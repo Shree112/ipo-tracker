@@ -288,3 +288,22 @@ ALTER TABLE issues ADD COLUMN IF NOT EXISTS site_status       text;
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS withdrawn         boolean;
 CREATE UNIQUE INDEX IF NOT EXISTS issues_investorgain_id_uidx
   ON issues (investorgain_id) WHERE investorgain_id IS NOT NULL;
+
+
+-- ============================================================
+-- digest_run - one row per digest actually sent, so a rerun of the
+-- morning job on the same day never mails twice.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS digest_run (
+  digest_date  date        PRIMARY KEY,
+  sent_at      timestamptz NOT NULL DEFAULT now(),
+  issue_ids    bigint[]    NOT NULL,
+  subject      text,
+  provider_id  text
+);
+
+
+-- Issue size split, for the digest: fresh issue (money to the company)
+-- vs offer for sale (existing shareholders selling).
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS fresh_issue_cr numeric(14,2);
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS ofs_cr         numeric(14,2);

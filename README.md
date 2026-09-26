@@ -145,7 +145,9 @@ scripts/backfill_gmp.py        GMP history -> gmp_history + t_minus_1 snapshots
 scripts/probe_gmp.py           reconnaissance for the GMP sources
 sources/investorgain.py        InvestorGain adapter (live calendar + GMP)
 scripts/run_live.py            the daily live job
-.github/workflows/live.yml     runs it at 05:45 and 19:15 IST
+scripts/send_digest.py         the morning digest email
+scripts/mark.py                mark an issue applied / skipped
+.github/workflows/live.yml     07:35 IST refresh + digest, 19:15 IST refresh
 scripts/apply_schema.py        create/update tables
 scripts/probe_chittorgarh.py   reconnaissance
 data/raw/                      cached HTML, gitignored
@@ -212,4 +214,24 @@ include it (GMP >10% from T-1). The email itself is milestone 2.
 **Scheduling** is `.github/workflows/live.yml`: push this folder to a
 *private* GitHub repo and add `DATABASE_URL` as an Actions secret. `.env` is
 gitignored and must stay that way.
+
+---
+
+## Morning digest
+
+```bat
+python scripts\send_digest.py --dry-run     :: build it, save data\digest-preview.html, send nothing
+python scripts\send_digest.py               :: send (once per day; reruns do nothing)
+python scripts\mark.py "moneyview" applied  :: leaves tomorrow's digest (also: skipped, undo)
+python scripts\mark.py --list               :: live issues and their status
+```
+
+Membership: **entry** GMP >10% on either source from T-1 onwards; **sticky**
+once it has been in a digest; **exit** when marked applied/skipped or closed.
+Blocks: Closes today / Open now / Opens tomorrow. No eligible issues, no email.
+
+Email goes through Resend. Sign up at resend.com **with the DIGEST_TO
+address** - without a verified domain, the test sender can only deliver to
+the account's own address. Put `RESEND_API_KEY` in `.env` and in the Actions
+secrets (with `DIGEST_TO`).
 

@@ -112,6 +112,7 @@ def write_investorgain(conn, issues: list[dict], log) -> dict[int, int]:
             listing_date=rec["listing_date"], price_band_low=rec["price_band_low"],
             price_band_high=rec["price_band_high"], lot_size=rec["lot_size"],
             min_order_amount=rec["min_order_amount"], issue_size_cr=rec["issue_size_cr"],
+            fresh_issue_cr=rec["fresh_issue_cr"], ofs_cr=rec["ofs_cr"],
             rhp_url=rec["rhp_url"], anchor_report_url=rec["anchor_report_url"],
             nse_symbol=rec["nse_symbol"], bse_code=rec["bse_code"],
             site_status=rec["site_status"], withdrawn=rec["withdrawn"],

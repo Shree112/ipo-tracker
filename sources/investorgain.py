@@ -154,6 +154,12 @@ def parse_issue(html: str) -> dict[str, Any]:
         "lot_size": int(_num(ipo.get("market_lot_size")) or 0) or None,
         "min_order_amount": _num(ipo.get("min_order_amount")),
         "issue_size_cr": (_num(ipo.get("issue_size_in_amt")) or 0) / 1e7 or None,
+        # fresh = new money to the company; OFS = existing holders selling.
+        # 0 is a real value (all-fresh issue), so only a missing field is None.
+        "fresh_issue_cr": (_num(ipo.get("issue_size_fresh_in_amt")) / 1e7
+                           if _num(ipo.get("issue_size_fresh_in_amt")) is not None else None),
+        "ofs_cr": (_num(ipo.get("issue_size_ofs_in_amt")) / 1e7
+                   if _num(ipo.get("issue_size_ofs_in_amt")) is not None else None),
         "rhp_url": ipo.get("prospectus_rhp") or None,
         "anchor_report_url": ipo.get("anchor_investor_url") or None,
         "nse_symbol": ipo.get("nse_cd") or ipo.get("nse_symbol") or None,

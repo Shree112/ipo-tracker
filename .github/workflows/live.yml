@@ -1,15 +1,22 @@
-# Daily live job: calendar + GMP, and the T-1 freeze.
+# Daily live job: calendar + GMP, the T-1 freeze, and the morning digest.
 # Runs on GitHub's servers, so it doesn't depend on your laptop being on.
 #
-# One-time setup: repo Settings -> Secrets and variables -> Actions ->
-# New repository secret  DATABASE_URL  = the same Session pooler string as .env
+# Repo Settings -> Secrets and variables -> Actions -> repository secrets:
+#   DATABASE_URL     the same Session pooler string as .env
+#   RESEND_API_KEY   from resend.com -> API Keys
+#   DIGEST_TO        ahuja.shree31@gmail.com
 name: live
 
 on:
   schedule:
-    - cron: "15 0 * * *"    # 05:45 IST - fresh numbers before the 8am digest
-    - cron: "45 13 * * *"   # 19:15 IST - captures the evening GMP before an open date
-  workflow_dispatch: {}     # "Run workflow" button for manual runs
+    - cron: "5 2 * * *"     # 07:35 IST - refresh, then send the digest (~8am)
+    - cron: "45 13 * * *"   # 19:15 IST - refresh only; captures the evening GMP before an open date
+  workflow_dispatch:
+    inputs:
+      send_digest:
+        description: "Also send today's digest (skipped if already sent today)"
+        type: boolean
+        default: false
 
 concurrency:
   group: live
@@ -19,6 +26,9 @@ jobs:
   live:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      USER_AGENT: ipo-tracker/0.1 (personal research project)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,7 +36,11 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
+      - run: python scripts/apply_schema.py
       - run: python scripts/run_live.py
+      - name: Send the morning digest
+        if: github.event.schedule == '5 2 * * *' || inputs.send_digest
+        run: python scripts/send_digest.py
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          USER_AGENT: ipo-tracker/0.1 (personal research project)
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          DIGEST_TO: ${{ secrets.DIGEST_TO }}
