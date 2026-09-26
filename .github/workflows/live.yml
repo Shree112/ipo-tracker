@@ -1,0 +1,32 @@
+# Daily live job: calendar + GMP, and the T-1 freeze.
+# Runs on GitHub's servers, so it doesn't depend on your laptop being on.
+#
+# One-time setup: repo Settings -> Secrets and variables -> Actions ->
+# New repository secret  DATABASE_URL  = the same Session pooler string as .env
+name: live
+
+on:
+  schedule:
+    - cron: "15 0 * * *"    # 05:45 IST - fresh numbers before the 8am digest
+    - cron: "45 13 * * *"   # 19:15 IST - captures the evening GMP before an open date
+  workflow_dispatch: {}     # "Run workflow" button for manual runs
+
+concurrency:
+  group: live
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python scripts/run_live.py
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          USER_AGENT: ipo-tracker/0.1 (personal research project)
