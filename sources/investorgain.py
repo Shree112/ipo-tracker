@@ -211,3 +211,55 @@ def fetch_issue(url: str, *, use_cache: bool = False) -> dict[str, Any]:
     rec = parse_issue(get_page(url, use_cache=use_cache))
     rec["url"] = url
     return rec
+
+
+# ---------------------------------------------------------------- subscription
+
+SUBSCRIPTION_URL = f"{HOST}/report/ipo-subscription-live/333/"
+_SUB_PATH = re.compile(r"/subscription/([a-z0-9-]+)/(\d+)/")
+_SUB_COLS = {"qib": "qib_x", "shni": "shni_x", "bhni": "bhni_x", "nii": "nii_x",
+             "rii": "rii_x", "total": "total_x", "emp": "employee_x", "employee": "employee_x",
+             "pe": "pe_ratio"}
+
+
+def _norm_key(k: str) -> str:
+    return re.sub(r"[^a-z]", "", re.sub(r"<[^>]+>", "", str(k)).lower())
+
+
+def _cell_num(v: Any) -> float | None:
+    if v is None:
+        return None
+    txt = re.sub(r"<[^>]+>", " ", str(v)).replace(",", "")
+    m = re.search(r"-?\d+(?:\.\d+)?", txt)
+    return float(m.group(0)) if m else None
+
+
+def parse_subscription(html: str) -> list[dict[str, Any]]:
+    """Live subscription report: one row per open/just-closed issue, times
+    subscribed by category. The issue link carries the same InvestorGain id
+    as the GMP page, which is how rows join onto issues.investorgain_id.
+    Includes SME rows - they simply won't match a mainboard issue."""
+    rows = _array(flight_payload(html), "reportTableData")
+    if rows is None:
+        raise ParseError("reportTableData missing from the subscription report")
+    out = []
+    for row in rows:
+        m = _SUB_PATH.search(json.dumps(row, ensure_ascii=False))
+        if not m:
+            continue
+        rec: dict[str, Any] = {"ig_id": int(m.group(2)), "site_updated": None, "raw": {}}
+        for k, v in row.items():
+            nk = _norm_key(k)
+            if nk in _SUB_COLS:
+                rec[_SUB_COLS[nk]] = _cell_num(v)
+                rec["raw"][k] = re.sub(r"<[^>]+>", "", str(v))
+            elif "lastupdated" in nk or "updatedon" in nk:
+                rec["site_updated"] = str(v)
+        if rec.get("total_x") is None and rec.get("rii_x") is None:
+            continue
+        out.append(rec)
+    return out
+
+
+def fetch_subscription(*, use_cache: bool = False) -> list[dict[str, Any]]:
+    return parse_subscription(get_page(SUBSCRIPTION_URL, use_cache=use_cache))

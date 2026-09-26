@@ -48,7 +48,7 @@ def load(conn, today: date) -> list[dict]:
         cur.execute(
             """SELECT i.id, i.name, i.slug, i.open_date, i.close_date, i.anchor_date,
                       i.listing_date, i.price_band_low, i.price_band_high, i.lot_size,
-                      i.issue_size_cr, i.fresh_issue_cr, i.ofs_cr,
+                      i.issue_size_cr, i.fresh_issue_cr, i.ofs_cr, i.pe_ratio,
                       i.min_order_amount, i.rhp_url, i.anchor_report_url,
                       i.investorgain_url, i.ipowatch_url, st.status
                FROM issues i LEFT JOIN issue_status st ON st.issue_id = i.id
@@ -70,6 +70,13 @@ def load(conn, today: date) -> list[dict]:
             ([i["id"] for i in issues], ist_start(today - timedelta(days=14))),
         )
         readings = cur.fetchall()
+        cur.execute(
+            """SELECT DISTINCT ON (issue_id) issue_id, observed_at, qib_x, nii_x, rii_x, total_x
+               FROM subscription WHERE issue_id = ANY(%s)
+               ORDER BY issue_id, observed_at DESC""",
+            ([i["id"] for i in issues],),
+        )
+        subs = {r["issue_id"]: r for r in cur.fetchall()}
 
     by_issue: dict[int, list] = {}
     for r in readings:
@@ -108,7 +115,7 @@ def load(conn, today: date) -> list[dict]:
             block = "open"
         else:
             block = "tomorrow"
-        i.update(per_source=per_source, peak=peak,
+        i.update(per_source=per_source, peak=peak, sub=subs.get(i["id"]),
                  now_max=max(current, default=None), block=block,
                  sticky=(peak is not None and max(current, default=0) <= TRIGGER_PCT))
         out.append(i)
@@ -185,6 +192,12 @@ def _when(dt: datetime, today: date) -> str:
     return local.strftime("%H:%M") if local.date() == today else local.strftime("%d %b %H:%M")
 
 
+def sub_summary(sub: dict) -> str:
+    f = lambda x: f"{float(x):.2f}×" if x is not None else "-"
+    return (f"{f(sub['total_x'])} · QIB {f(sub['qib_x'])} · NII {f(sub['nii_x'])}"
+            f" · Retail {f(sub['rii_x'])}")
+
+
 def primary_gmp(i: dict):
     """(source, stats) - InvestorGain first, IPO Watch as fallback."""
     for src in ("investorgain", "ipowatch"):
@@ -228,8 +241,8 @@ def text_row(i: dict, today: date) -> list[str]:
     split = size_split(i)
     lines = [f"* {i['name']}  [{stage_label(i, today)}]",
              f"  GMP {gmp} | Size {_cr(i['issue_size_cr'])}{' (' + split + ')' if split else ''}"
-             f" | 1 lot {_rs(i['min_order_amount'], 0)} | {last}",
-             f"  Price {_band(i)} · lot {i['lot_size'] or '-'}"
+             f" | {last}",
+             f"  Price {_band(i)}"
              + (f" · lists {i['listing_date']:%d %b}" if i["listing_date"] else "")]
     srcs = [f"{SOURCE_LABEL[k]} {float(v['latest']['gmp_pct']):.1f}%"
             f" ({v['latest']['observed_at'].astimezone(IST):%d %b %H:%M}{', STALE' if v['stale'] else ''})"
@@ -264,7 +277,7 @@ def render_text(issues: list[dict], today: date) -> str:
 
 def _stat(label: str, value: str, sub: str = "", colour: str | None = None) -> str:
     e = html.escape
-    return (f'<td valign="top" width="25%" style="padding:10px 8px 10px 0;">'
+    return (f'<td valign="top" width="33%" style="padding:10px 8px 10px 0;">'
             f'<div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:{C["muted"]};'
             f'font-weight:600;">{e(label)}</div>'
             f'<div style="font-size:19px;font-weight:700;color:{colour or C["ink"]};line-height:1.25;'
@@ -296,7 +309,6 @@ def card(i: dict, today: date) -> str:
                      i["close_date"].strftime("%a"), C["clay"] if i["block"] == "closes" else None)
     stats = (_stat("GMP", gmp_val, gmp_sub, gmp_col)
              + _stat("Size", _cr(i["issue_size_cr"]), e(size_split_short(i)))
-             + _stat("1 lot", _rs(i["min_order_amount"], 0), f"{i['lot_size'] or '-'} shares")
              + last)
 
     name = e(i["name"])

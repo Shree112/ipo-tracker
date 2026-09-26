@@ -307,3 +307,18 @@ CREATE TABLE IF NOT EXISTS digest_run (
 -- vs offer for sale (existing shareholders selling).
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS fresh_issue_cr numeric(14,2);
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS ofs_cr         numeric(14,2);
+
+
+-- ============================================================
+-- Live subscription from InvestorGain's subscription report (one page
+-- for every open issue). The exchanges stay the authority; this is the
+-- practical feed until the NSE handshake is proven from a datacentre IP.
+-- SHNI / BHNI are the small (2-10 lakh) and big (>10 lakh) NII buckets.
+-- ============================================================
+ALTER TABLE subscription DROP CONSTRAINT IF EXISTS subscription_source_check;
+ALTER TABLE subscription ADD CONSTRAINT subscription_source_check
+  CHECK (source IN ('nse','bse','chittorgarh','investorgain'));
+ALTER TABLE subscription ADD COLUMN IF NOT EXISTS shni_x numeric(10,3);
+ALTER TABLE subscription ADD COLUMN IF NOT EXISTS bhni_x numeric(10,3);
+ALTER TABLE subscription ADD COLUMN IF NOT EXISTS raw    jsonb;
+ALTER TABLE issues       ADD COLUMN IF NOT EXISTS pe_ratio numeric(10,2);

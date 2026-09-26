@@ -235,3 +235,20 @@ address** - without a verified domain, the test sender can only deliver to
 the account's own address. Put `RESEND_API_KEY` in `.env` and in the Actions
 secrets (with `DIGEST_TO`).
 
+---
+
+## Live subscription + close-day snapshot
+
+`run_live.py` also reads InvestorGain's live subscription report (one page,
+every open issue): QIB / SHNI / BHNI / NII / retail / total, times subscribed,
+plus P/E. Rows join on `issues.investorgain_id`; SME rows are ignored. A new
+`subscription` row is written only when a number moved.
+
+For issues that closed in the last 3 days, the job freezes a `close_day`
+snapshot: the last subscription reading taken **on the close date**, the last
+GMP before the close, and your decision (applied / skipped / none). Together
+with the T-1 snapshot that is the calibration log's input side.
+
+The digest shows the latest subscription on each card, and P/E beside the
+price band.
+

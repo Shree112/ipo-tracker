@@ -15,6 +15,9 @@ visible and doesn't stop the others:
                    fields, mainboard only) + gmp_history (source investorgain)
   2. IPO Watch     live mainboard table -> gmp_history (source ipowatch),
                    matched onto issues by window + name/price
+  2b. Subscription InvestorGain's live subscription report (QIB / SHNI / BHNI /
+                   NII / retail / total, times subscribed) -> subscription table,
+                   written only when a number moved
   3. T-1 freeze    for issues that have opened in the last 3 days and have no
                    t_minus_1 snapshot: the latest GMP observed BEFORE the open
                    date, InvestorGain first, IPO Watch as fallback. Same rule
@@ -209,6 +212,99 @@ def freeze_t_minus_1(conn, today: date) -> list[str]:
     return frozen
 
 
+def write_subscription(conn, subs: list[dict], log) -> int:
+    """One row per issue per run - but only when a number actually moved,
+    so the table is a clean series of changes rather than repeats."""
+    fetched_at = datetime.now(iw.IST).replace(second=0, microsecond=0)
+    ids = [s["ig_id"] for s in subs]
+    with conn.cursor() as cur:
+        cur.execute("SELECT id, investorgain_id FROM issues WHERE investorgain_id = ANY(%s)", (ids,))
+        issue_of = {r["investorgain_id"]: r["id"] for r in cur.fetchall()}
+        matched = 0
+        for s in subs:
+            log.seen += 1
+            issue_id = issue_of.get(s["ig_id"])
+            if issue_id is None:
+                continue  # SME, or an issue the GMP report doesn't list
+            matched += 1
+            if s.get("pe_ratio") is not None:
+                cur.execute("UPDATE issues SET pe_ratio = %s WHERE id = %s", (s["pe_ratio"], issue_id))
+            cur.execute(
+                """SELECT qib_x, nii_x, rii_x, total_x FROM subscription
+                   WHERE issue_id = %s AND source = 'investorgain' ORDER BY observed_at DESC LIMIT 1""",
+                (issue_id,),
+            )
+            last = cur.fetchone()
+            now = tuple(s.get(k) for k in ("qib_x", "nii_x", "rii_x", "total_x"))
+            if last and tuple(None if last[k] is None else float(last[k])
+                              for k in ("qib_x", "nii_x", "rii_x", "total_x")) == now:
+                continue
+            cur.execute(
+                """INSERT INTO subscription (issue_id, observed_at, source, qib_x, nii_x, rii_x,
+                                             employee_x, total_x, shni_x, bhni_x, raw)
+                   VALUES (%s,%s,'investorgain',%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (issue_id, source, observed_at) DO NOTHING""",
+                (issue_id, fetched_at, s.get("qib_x"), s.get("nii_x"), s.get("rii_x"),
+                 s.get("employee_x"), s.get("total_x"), s.get("shni_x"), s.get("bhni_x"),
+                 json.dumps({**s["raw"], "site_updated": s["site_updated"]})),
+            )
+            log.written += cur.rowcount
+    return matched
+
+
+def freeze_close_day(conn, today: date) -> list[str]:
+    """For issues that closed in the last 3 days: the last subscription and
+    GMP readings taken on or before the close date, plus what you decided.
+    This is the 'freeze the decision' half of the loop."""
+    frozen = []
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT i.id, i.name, i.close_date, COALESCE(st.status, 'none') AS decision
+               FROM issues i LEFT JOIN issue_status st ON st.issue_id = i.id
+               WHERE i.board = 'mainboard' AND i.close_date BETWEEN %s AND %s
+                 AND NOT EXISTS (SELECT 1 FROM signal_snapshot s
+                                 WHERE s.issue_id = i.id AND s.phase = 'close_day')""",
+            (today - timedelta(days=3), today - timedelta(days=1)),
+        )
+        for issue in cur.fetchall():
+            cutoff = ist_start(issue["close_date"] + timedelta(days=1))
+            cur.execute(
+                """SELECT observed_at, qib_x, nii_x, rii_x, total_x FROM subscription
+                   WHERE issue_id = %s AND observed_at < %s ORDER BY observed_at DESC LIMIT 1""",
+                (issue["id"], cutoff),
+            )
+            sub = cur.fetchone()
+            # Only a reading taken ON the close date counts as the close-day
+            # number; an older one would pass day-1 figures off as final.
+            if not sub or sub["observed_at"] < ist_start(issue["close_date"]):
+                frozen.append(f"{issue['name']}: no subscription reading on the close date - skipped")
+                continue
+            cur.execute(
+                """SELECT source, observed_at, gmp_amount, gmp_pct FROM gmp_history
+                   WHERE issue_id = %s AND observed_at < %s AND gmp_amount IS NOT NULL
+                   ORDER BY (source = 'investorgain') DESC, observed_at DESC LIMIT 1""",
+                (issue["id"], cutoff),
+            )
+            gmp = cur.fetchone()
+            cur.execute(
+                """INSERT INTO signal_snapshot (issue_id, phase, taken_at, gmp_amount, gmp_pct,
+                                                sub_qib_x, sub_nii_x, sub_rii_x, sub_total_x, extras)
+                   VALUES (%s,'close_day',now(),%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (issue_id, phase) DO NOTHING""",
+                (issue["id"], gmp and gmp["gmp_amount"], gmp and gmp["gmp_pct"],
+                 sub["qib_x"], sub["nii_x"], sub["rii_x"], sub["total_x"],
+                 json.dumps({"source": "live",
+                             "subscription_observed_at": sub["observed_at"].isoformat(),
+                             "gmp_source": gmp and gmp["source"],
+                             "gmp_observed_at": gmp and gmp["observed_at"].isoformat(),
+                             "decision": issue["decision"]})),
+            )
+            if cur.rowcount:
+                frozen.append(f"{issue['name']}: {float(sub['total_x'] or 0):.2f}x total, "
+                              f"retail {float(sub['rii_x'] or 0):.2f}x, decision {issue['decision']}")
+    return frozen
+
+
 # ---------------------------------------------------------------- report
 
 def stage(i: dict, today: date) -> str:
@@ -233,7 +329,7 @@ def board(issues: list[dict], iw_rows: list[dict], today: date) -> None:
     live = [i for i in issues if i.get("close_date") is None or i["close_date"] >= today - timedelta(days=1)]
     live.sort(key=lambda i: (i.get("open_date") or date.max))
     print(f"\n--- mainboard board, {today:%a %d %b %Y} (IST) ---")
-    print(f"{'issue':<30}{'window':<16}{'upper':>8}{'1 lot':>10}{'IG GMP':>9}{'IW GMP':>9}  stage / digest")
+    print(f"{'issue':<30}{'window':<16}{'upper':>8}{'1 lot':>10}{'IG GMP':>9}{'IW GMP':>9}{'sub':>8}{'retail':>8}  stage / digest")
     for i in live:
         ig_g = i["gmp"][-1] if i.get("gmp") else None
         iw_r = by_issue.get(id(i))
@@ -256,8 +352,10 @@ def board(issues: list[dict], iw_rows: list[dict], today: date) -> None:
                     else f"  <- DIGEST (sticky: peaked {peak:.1f}%, now below 10%)")
         win = f"{i['open_date']:%d %b}-{i['close_date']:%d %b}" if i.get("open_date") and i.get("close_date") else "-"
         fmt = lambda p: f"{p:.1f}%" if p is not None else "-"
+        fx = lambda x: f"{x:.2f}x" if x is not None else "-"
         print(f"{i['name'][:29]:<30}{win:<16}{(i.get('price_band_high') or 0):>8.0f}"
-              f"{(i.get('min_order_amount') or 0):>10.0f}{fmt((ig_g or {}).get('gmp_pct')):>9}{fmt(iw_pct):>9}  {st}{flag}")
+              f"{(i.get('min_order_amount') or 0):>10.0f}{fmt((ig_g or {}).get('gmp_pct')):>9}{fmt(iw_pct):>9}"
+              f"{fx((i.get('sub') or {}).get('total_x')):>8}{fx((i.get('sub') or {}).get('rii_x')):>8}  {st}{flag}")
 
 
 # ---------------------------------------------------------------- main
@@ -280,6 +378,16 @@ def main() -> None:
         iw_rows = []
         print(f"IPO Watch:    FAILED - {exc}")
 
+    try:
+        subs = ig.fetch_subscription(use_cache=args.use_cache)
+        print(f"Subscription: {len(subs)} rows in InvestorGain's live report")
+    except (ig.ParseError, base.FetchError) as exc:
+        subs = []
+        print(f"Subscription: FAILED - {exc}")
+    sub_by_ig = {s["ig_id"]: s for s in subs}
+    for rec in ig_issues:
+        rec["sub"] = sub_by_ig.get(rec["ig_id"])
+
     if not args.dry_run:
         import db
 
@@ -294,9 +402,13 @@ def main() -> None:
                 print(f"wrote {log.written} IPO Watch GMP readings")
                 if unmatched:
                     print(f"  IPO Watch rows not matched to an InvestorGain issue: {', '.join(unmatched)}")
-            frozen = freeze_t_minus_1(conn, today)
+            with db.RunLog(conn, "investorgain-subscription") as log:
+                n = write_subscription(conn, subs, log)
+                print(f"subscription: {n} mainboard issues matched, {log.written} changed readings written")
+            frozen = ([f"T-1       {x}" for x in freeze_t_minus_1(conn, today)]
+                      + [f"close day {x}" for x in freeze_close_day(conn, today)])
             for f in frozen:
-                print(f"T-1 frozen: {f}")
+                print(f"snapshot: {f}")
 
     board(ig_issues, iw_rows, today)
 
