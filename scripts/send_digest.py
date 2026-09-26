@@ -163,6 +163,28 @@ def size_split(i: dict) -> str:
     return f"fresh {_cr(f)} · OFS {_cr(o)}"
 
 
+def size_split_short(i: dict) -> str:
+    """For the card's small line: 'fresh 69%' / 'all fresh' / 'all OFS'."""
+    f, o = i.get("fresh_issue_cr"), i.get("ofs_cr")
+    if f is None and o is None:
+        return ""
+    f, o = float(f or 0), float(o or 0)
+    if o == 0 and f > 0:
+        return "all fresh"
+    if f == 0 and o > 0:
+        return "all OFS"
+    return f"fresh {f / (f + o) * 100:.0f}% · OFS {o / (f + o) * 100:.0f}%"
+
+
+def _workdays(a: date, b: date) -> int:
+    return sum(1 for k in range((b - a).days + 1) if (a + timedelta(days=k)).weekday() < 5)
+
+
+def _when(dt: datetime, today: date) -> str:
+    local = dt.astimezone(IST)
+    return local.strftime("%H:%M") if local.date() == today else local.strftime("%d %b %H:%M")
+
+
 def primary_gmp(i: dict):
     """(source, stats) - InvestorGain first, IPO Watch as fallback."""
     for src in ("investorgain", "ipowatch"):
@@ -180,10 +202,17 @@ def _delta(s: dict) -> float | None:
 def stage_label(i: dict, today: date) -> str:
     if i["block"] == "tomorrow":
         return "Opens tomorrow"
+    total = _workdays(i["open_date"], i["close_date"])
     if i["block"] == "closes":
-        return "Closes today"
-    day = (today - i["open_date"]).days + 1
-    return f"Open · closes {i['close_date']:%a %d %b}" if day > 1 else "Opened today"
+        return f"Last day · {total} of {total}"
+    # On a weekend, describe the next trading day rather than the one gone.
+    d, suffix = today, ""
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    if d != today:
+        suffix = f" · {d:%a}"
+    n = _workdays(i["open_date"], d)
+    return (f"Last day{suffix}" if n == total else f"Day {n} of {total}{suffix}")
 
 
 # ---- plain text (fallback part of the email) ----
@@ -265,9 +294,8 @@ def card(i: dict, today: date) -> str:
     else:
         last = _stat("Closes", "Today" if i["block"] == "closes" else f"{i['close_date']:%d %b}",
                      i["close_date"].strftime("%a"), C["clay"] if i["block"] == "closes" else None)
-    split = size_split(i)
     stats = (_stat("GMP", gmp_val, gmp_sub, gmp_col)
-             + _stat("Size", _cr(i["issue_size_cr"]), e(split))
+             + _stat("Size", _cr(i["issue_size_cr"]), e(size_split_short(i)))
              + _stat("1 lot", _rs(i["min_order_amount"], 0), f"{i['lot_size'] or '-'} shares")
              + last)
 
@@ -285,7 +313,7 @@ def card(i: dict, today: date) -> str:
         facts.append(f"lists {i['listing_date']:%d %b}")
     srcs = " · ".join(
         f"{SOURCE_LABEL[k]} <b>{float(v['latest']['gmp_pct']):.1f}%</b>"
-        f" <span style='color:{C['muted']};'>{v['latest']['observed_at'].astimezone(IST):%d %b %H:%M}"
+        f" <span style='color:{C['muted']};'>{_when(v['latest']['observed_at'], today)}"
         f"{' · stale' if v['stale'] else ''}</span>"
         for k, v in i["per_source"].items())
     sticky = (f'<div style="font-size:13px;color:{C["amber"]};font-weight:600;margin-top:8px;">'
