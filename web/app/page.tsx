@@ -1,127 +1,67 @@
-import Link from "next/link";
 import TopBar from "@/components/TopBar";
-import { StageChip, StatusChip } from "@/components/Chips";
+import HomeList, { type HomeRow } from "@/components/HomeList";
 import { crore, fmtDate, fmtWhen, pct, sizeSplit, stageOf, times, todayIST } from "@/lib/format";
 import { inDigest, listIssues, TRIGGER_PCT, type IssueRow } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
-function primaryGmp(i: IssueRow) {
-  const all = i.gmp_latest ?? [];
-  return all.find((g) => g.source === "investorgain") ?? all[0] ?? null;
-}
+const SRC: Record<string, string> = { investorgain: "InvestorGain", ipowatch: "IPO Watch" };
 
-function Row({ i, today, flagged }: { i: IssueRow; today: string; flagged: boolean }) {
+function toRow(i: IssueRow, today: string): HomeRow {
   const stage = stageOf(i.open_date, i.close_date, i.listing_date, today);
-  const g = primaryGmp(i);
-  const other = (i.gmp_latest ?? []).find((x) => x.source !== g?.source);
-  const sticky = flagged && g !== null && g.gmp_pct <= TRIGGER_PCT;
-  const listed = stage.key === "listed" && i.listing_gain_pct !== null;
-  return (
-    <Link href={`/issue/${i.slug}`} className={`row-card ${flagged ? "flag" : ""} ${sticky ? "sticky" : ""}`}>
-      <div className="head">
-        <div className="nm">{i.name}</div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-          <StageChip stage={stage} />
-          <StatusChip status={i.status} />
-        </div>
-      </div>
-      {listed ? (
-        <div className="cell">
-          <div className="label">Listing gain</div>
-          <div className={`value ${i.listing_gain_pct! >= 0 ? "up" : "down"}`}>
-            {i.listing_gain_pct! >= 0 ? "+" : ""}
-            {pct(i.listing_gain_pct)}
-          </div>
-          <div className="sub">at the {i.price_basis ?? "open"}</div>
-        </div>
-      ) : (
-        <div className="cell">
-          <div className="label">GMP</div>
-          <div className="value" style={{ color: sticky ? "var(--amber)" : undefined }}>{g ? pct(g.gmp_pct) : "–"}</div>
-          <div className="sub">
-            {other ? `${other.source === "ipowatch" ? "IPO Watch" : "InvestorGain"} ${pct(other.gmp_pct)}` : g ? fmtWhen(g.observed_at, today) : ""}
-          </div>
-        </div>
-      )}
-      <div className="cell">
-        <div className="label">Size</div>
-        <div className="value">{crore(i.issue_size_cr)}</div>
-        <div className="sub">{sizeSplit(i.fresh_issue_cr, i.ofs_cr)}</div>
-      </div>
-      <div className="cell">
-        <div className="label">Subscribed</div>
-        <div className="value">{i.sub_latest ? times(i.sub_latest.total_x) : "–"}</div>
-        <div className="sub">
-          {i.sub_latest
-            ? `retail ${times(i.sub_latest.rii_x)}`
-            : stage.key === "upcoming" || stage.key === "tomorrow"
-              ? "not open yet"
-              : "no reading yet"}
-        </div>
-      </div>
-      <div className="cell">
-        <div className="label">{stage.key === "upcoming" || stage.key === "tomorrow" ? "Opens" : stage.key === "closed" || stage.key === "listed" ? "Lists" : "Closes"}</div>
-        <div className="value">
-          {fmtDate(
-            stage.key === "upcoming" || stage.key === "tomorrow"
-              ? i.open_date
-              : stage.key === "closed" || stage.key === "listed"
-                ? i.listing_date
-                : i.close_date,
-          )}
-        </div>
-        <div className="sub">{i.open_date && i.close_date ? `${fmtDate(i.open_date)} – ${fmtDate(i.close_date)}` : ""}</div>
-      </div>
-    </Link>
-  );
-}
-
-function Group({ title, note, items, today, digest }: { title: string; note?: string; items: IssueRow[]; today: string; digest: Set<number> }) {
-  if (!items.length) return null;
-  return (
-    <section className="group">
-      <div className="group-title">
-        <h2 style={{ margin: 0 }}>{title}</h2>
-        <span className="muted small">
-          {items.length}
-          {note ? ` · ${note}` : ""}
-        </span>
-      </div>
-      <div className="list">
-        {items.map((i) => (
-          <Row key={i.id} i={i} today={today} flagged={digest.has(i.id)} />
-        ))}
-      </div>
-    </section>
-  );
+  const all = i.gmp_latest ?? [];
+  const g = all.find((x) => x.source === "investorgain") ?? all[0] ?? null;
+  const other = all.find((x) => x.source !== g?.source);
+  const radar = inDigest(i, today);
+  const sticky = radar && g !== null && g.gmp_pct <= TRIGGER_PCT;
+  const before = stage.key === "upcoming" || stage.key === "tomorrow";
+  const after = stage.key === "closed" || stage.key === "listed";
+  const group: HomeRow["group"] =
+    stage.key === "listed" ? "listed" : stage.key === "closed" ? "awaiting" : before ? "upcoming" : "open";
+  return {
+    id: i.id,
+    slug: i.slug,
+    name: i.name.replace(/ (Ltd|Limited)\.?$/i, ""),
+    stage,
+    group,
+    radar,
+    sticky,
+    status: i.status,
+    gmp: g ? pct(g.gmp_pct) : "–",
+    gmpSub: other ? `${SRC[other.source]} ${pct(other.gmp_pct)}` : g ? fmtWhen(g.observed_at, today) : "no quote",
+    gmpTone: sticky ? "warn" : "",
+    spark: [...(i.spark ?? [])].reverse(),
+    listingGain: stage.key === "listed" && i.listing_gain_pct !== null ? `${i.listing_gain_pct >= 0 ? "+" : ""}${pct(i.listing_gain_pct)}` : null,
+    listingUp: (i.listing_gain_pct ?? 0) >= 0,
+    size: crore(i.issue_size_cr),
+    sizeSub: sizeSplit(i.fresh_issue_cr, i.ofs_cr),
+    sub: i.sub_latest ? times(i.sub_latest.total_x) : "–",
+    subSub: i.sub_latest ? `retail ${times(i.sub_latest.rii_x)}` : before ? "opens " + fmtDate(i.open_date) : "no reading",
+    dateLabel: before ? "Opens" : after ? "Lists" : "Closes",
+    date: fmtDate(before ? i.open_date : after ? i.listing_date : i.close_date, true),
+    window: i.open_date && i.close_date ? `${fmtDate(i.open_date)} – ${fmtDate(i.close_date)}` : "",
+  };
 }
 
 export default async function Home() {
   const today = todayIST();
-  const issues = await listIssues();
-  const digest = new Set(issues.filter((i) => inDigest(i, today)).map((i) => i.id));
-
-  const inWindow = (i: IssueRow) => i.close_date !== null && today <= i.close_date;
-  const listed = (i: IssueRow) => i.listing_date !== null && today >= i.listing_date;
-
-  const radar = issues.filter((i) => digest.has(i.id));
-  const others = issues.filter((i) => !digest.has(i.id) && inWindow(i));
-  const awaiting = issues.filter((i) => !inWindow(i) && !listed(i));
-  const recent = issues.filter((i) => listed(i)).reverse();
-
+  const rows = (await listIssues()).map((i) => toRow(i, today));
+  const radar = rows.filter((r) => r.radar).length;
   return (
-    <main className="wrap">
+    <>
       <TopBar />
-      <p className="eyebrow">{fmtDate(today, true)} · mainboard</p>
-      <h1>Live IPOs</h1>
-      {!issues.length ? (
-        <div className="card empty section">Nothing open, upcoming or recently listed.</div>
-      ) : null}
-      <Group title="On your radar" note={`GMP above ${TRIGGER_PCT}% from the day before opening`} items={radar} today={today} digest={digest} />
-      <Group title="Open & upcoming" items={others} today={today} digest={digest} />
-      <Group title="Closed · awaiting listing" items={awaiting} today={today} digest={digest} />
-      <Group title="Recently listed" items={recent} today={today} digest={digest} />
-    </main>
+      <main className="wrap">
+        <div className="page-head">
+          <div>
+            <h1>Live IPOs</h1>
+            <p>
+              Mainboard issues, open and upcoming.{" "}
+              {radar ? `${radar} on your radar with GMP above ${TRIGGER_PCT}%.` : `Nothing above ${TRIGGER_PCT}% GMP right now.`}
+            </p>
+          </div>
+        </div>
+        {rows.length ? <HomeList rows={rows} /> : <div className="card empty">Nothing open, upcoming or recently listed.</div>}
+      </main>
+    </>
   );
 }

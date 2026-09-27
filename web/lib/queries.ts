@@ -92,6 +92,7 @@ export type IssueRow = {
   listing_open: number | null;
   listing_gain_pct: number | null;
   price_basis: string | null;
+  spark: number[] | null;
 };
 
 const ISSUE_COLUMNS = `
@@ -110,7 +111,14 @@ const ISSUE_COLUMNS = `
   (SELECT max(gmp_pct) FROM gmp_history g
      WHERE g.issue_id = i.id AND i.open_date IS NOT NULL
        AND g.observed_at >= ((i.open_date - 1)::timestamp AT TIME ZONE 'Asia/Kolkata')) AS peak_since_t1,
-  lo.listing_open, lo.listing_gain_pct, lo.price_basis
+  lo.listing_open, lo.listing_gain_pct, lo.price_basis,
+  (SELECT json_agg(v) FROM (
+     SELECT g.gmp_pct AS v FROM gmp_history g
+     WHERE g.issue_id = i.id AND g.gmp_pct IS NOT NULL
+       AND g.source = CASE WHEN EXISTS (SELECT 1 FROM gmp_history x
+                                        WHERE x.issue_id = i.id AND x.source = 'investorgain')
+                           THEN 'investorgain' ELSE 'ipowatch' END
+     ORDER BY g.observed_at DESC LIMIT 20) t) AS spark
 `;
 
 function normalise(r: Record<string, unknown>): IssueRow {
@@ -167,10 +175,16 @@ export async function getIssue(slug: string) {
     sql<{ phase: string; gmp_pct: number | null; sub_total_x: number | null; sub_rii_x: number | null; taken_at: Date; extras: Record<string, unknown> | null }[]>`
       SELECT phase, gmp_pct, sub_total_x, sub_rii_x, taken_at, extras
       FROM signal_snapshot WHERE issue_id = ${issue.id} ORDER BY phase DESC`,
+    // issue_detail arrives with a schema update; until the Python side has
+    // applied it, render the page without the research sections instead of
+    // failing the whole page.
     sql<IssueDetail[]>`
       SELECT anchor, anchor_summary, anchor_lockin_30, anchor_lockin_90,
              financials, peers, objects, kpis, updated_at
-      FROM issue_detail WHERE issue_id = ${issue.id}`,
+      FROM issue_detail WHERE issue_id = ${issue.id}`.catch((e: { code?: string }) => {
+      if (e?.code === "42P01" || e?.code === "42703") return [] as IssueDetail[];
+      throw e;
+    }),
   ]);
   const detail = details[0]
     ? {

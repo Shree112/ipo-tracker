@@ -34,6 +34,31 @@ from sources.ipowatch import IST  # noqa: E402
 
 TRIGGER_PCT = 10.0
 SITE_URL = os.getenv("SITE_URL", "").strip().rstrip("/")
+LINK_SECRET = os.getenv("LINK_SECRET", "").strip()
+
+
+def action_url(i: dict, decision: str) -> str | None:
+    """Signed one-tap link -> the site's confirmation page (see web/lib/links.ts).
+
+    The link itself changes nothing: it opens a page with a confirm button,
+    and only that POST writes. Email scanners that prefetch URLs are harmless.
+    Valid until two days after the issue closes.
+    """
+    if not (SITE_URL and LINK_SECRET):
+        return None
+    import base64
+    import hashlib
+    import hmac
+    import json as _json
+
+    expiry = int(datetime.combine(i["close_date"] + timedelta(days=2), time(0, 0), tzinfo=IST).timestamp())
+    body = base64.urlsafe_b64encode(
+        _json.dumps({"s": i["slug"], "d": decision, "x": expiry}, separators=(",", ":")).encode()
+    ).decode().rstrip("=")
+    sig = base64.urlsafe_b64encode(
+        hmac.new(LINK_SECRET.encode(), body.encode(), hashlib.sha256).digest()
+    ).decode().rstrip("=")
+    return f"{SITE_URL}/act/{body}.{sig}"
 
 
 def page_url(i: dict) -> str | None:
@@ -262,7 +287,11 @@ def text_row(i: dict, today: date) -> list[str]:
     if i["rhp_url"]:
         links.append(f"RHP: {i['rhp_url']}")
     lines += [f"  {l}" for l in links]
-    if page_url(i):
+    if action_url(i, "applied"):
+        lines.append(f"  Applied: {action_url(i, 'applied')}")
+        lines.append(f"  Skip:    {action_url(i, 'skipped')}")
+        lines.append(f"  Details: {page_url(i)}")
+    elif page_url(i):
         lines.append(f"  Open / mark applied: {page_url(i)}")
     else:
         lines.append(f'  Mark: python scripts\\mark.py "{i["slug"]}" applied')
@@ -351,7 +380,14 @@ def card(i: dict, today: date) -> str:
         f'<a href="{e(u)}" style="color:{C["jade"]};font-weight:600;text-decoration:none;">{e(t)}</a>'
         for t, u in links)
 
-    if page_url(i):
+    btn = ("display:inline-block;font-weight:600;font-size:14px;text-decoration:none;"
+           "padding:9px 16px;border-radius:8px;margin:0 6px 6px 0;")
+    if action_url(i, "applied"):
+        action = (f'<div style="margin-top:14px;">'
+                  f'<a href="{e(action_url(i, "applied"))}" style="{btn}background:{C["ink"]};color:#ffffff;">&#10003; Applied</a>'
+                  f'<a href="{e(action_url(i, "skipped"))}" style="{btn}background:#ffffff;color:{C["ink"]};border:1px solid {C["rule"]};">Skip</a>'
+                  f'<a href="{e(page_url(i))}" style="{btn}color:{C["jade"]};padding-left:4px;">Details &rarr;</a></div>')
+    elif page_url(i):
         action = (f'<div style="margin-top:12px;"><a href="{e(page_url(i))}" style="display:inline-block;'
                   f'background:{C["jade"]};color:#ffffff;font-weight:700;font-size:14px;text-decoration:none;'
                   f'padding:9px 16px;border-radius:6px;">Open &middot; mark applied or skip</a></div>')

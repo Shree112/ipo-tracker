@@ -14,5 +14,7 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   // Everything except the login page itself and Next's static assets.
-  matcher: ["/((?!login|_next/static|_next/image|favicon.ico|robots.txt).*)"],
+  // /act/<token> carries its own signature, so the email buttons work on a
+  // phone that has never signed in.
+  matcher: ["/((?!login|act/|_next/static|_next/image|favicon.ico|robots.txt).*)"],
 };

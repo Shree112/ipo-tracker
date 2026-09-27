@@ -32,39 +32,42 @@ export default async function LoginPage({
   const { next = "/", error } = await searchParams;
   const configured = Boolean(process.env.SITE_PASSWORD);
   return (
-    <main className="wrap" style={{ maxWidth: 420, paddingTop: "12vh" }}>
-      <p className="eyebrow">IPO Copilot</p>
-      <h1 style={{ marginBottom: 18 }}>Sign in</h1>
-      {!configured ? (
-        <p className="note-box">
-          SITE_PASSWORD isn&apos;t set on the server yet, so nobody can sign in. Add it under the
-          project&apos;s environment variables and redeploy.
-        </p>
-      ) : (
-        <form action={login} className="card" style={{ display: "grid", gap: 12 }}>
-          <input type="hidden" name="next" value={next} />
-          <label className="small muted" htmlFor="password">
-            Password
-          </label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            required
-            autoFocus
-            className="note-input"
-            style={{ width: "100%" }}
-          />
-          {error ? <p className="small down" style={{ margin: 0 }}>That password didn&apos;t match.</p> : null}
-          <button className="btn primary" type="submit">
-            Continue
-          </button>
-          <p className="small muted" style={{ margin: 0 }}>
-            This browser stays signed in for 90 days.
+    <main className="wrap">
+      <div className="center-card">
+        <div className="logo" style={{ marginBottom: 28 }}>
+          <span className="logo-mark" aria-hidden>IC</span>
+          <span>IPO Copilot</span>
+        </div>
+        {!configured ? (
+          <p className="note">
+            SITE_PASSWORD isn&apos;t set on the server yet, so nobody can sign in. Add it under the project&apos;s environment
+            variables and redeploy.
           </p>
-        </form>
-      )}
+        ) : (
+          <form action={login} className="card" style={{ display: "grid", gap: 14, padding: 24 }}>
+            <div>
+              <h1 style={{ fontSize: 22 }}>Sign in</h1>
+              <p className="muted small" style={{ marginTop: 4 }}>This browser stays signed in for 90 days.</p>
+            </div>
+            <input type="hidden" name="next" value={next} />
+            <input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              placeholder="Password"
+              aria-label="Password"
+              required
+              autoFocus
+              className="input"
+            />
+            {error ? <p className="small down">That password didn&apos;t match.</p> : null}
+            <button className="btn primary" type="submit">
+              Continue
+            </button>
+          </form>
+        )}
+      </div>
     </main>
   );
 }

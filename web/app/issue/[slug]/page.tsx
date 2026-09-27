@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import TopBar from "@/components/TopBar";
 import GmpChart, { type Series } from "@/components/GmpChart";
 import DecisionButtons from "@/components/DecisionButtons";
-import { StageChip, StatusChip } from "@/components/Chips";
+import { Avatar, RadarBadge, StageBadge, StatusBadge } from "@/components/Chips";
 import { AnchorBook, Financials, Objects, Peers } from "@/components/Research";
 import {
   addDays,
@@ -50,7 +50,7 @@ function SubBars({ sub }: { sub: SubPoint }) {
       {shown.map(([name, v, total]) => (
         <div className={`barrow ${total ? "total" : ""}`} role="row" key={name}>
           <span className="name" role="rowheader">{name}</span>
-          <span className="track" aria-hidden>
+          <span aria-hidden>
             <span className="fill" style={{ display: "block", width: `${(v / max) * 100}%` }} />
           </span>
           <span className="val" role="cell">{times(v)}</span>
@@ -97,170 +97,188 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
   const listed = i.listing_gain_pct !== null;
   const canDecide = stage.key !== "listed";
 
-  const timeline: [string, string | null][] = [
+
+  const steps: [string, string | null][] = [
     ["Anchor book", i.anchor_date],
     ["Opens", i.open_date],
     ["Closes", i.close_date],
     ["Lists", i.listing_date],
   ];
+  const shortName = i.name.replace(/ (Ltd|Limited)\.?$/i, "");
+  const meta = [
+    "Mainboard",
+    i.exchanges?.replace(",", ", ").replace(/\s+/g, " "),
+    i.price_band_high ? `Price band ${band(i.price_band_low, i.price_band_high)}` : null,
+  ].filter(Boolean);
 
   return (
-    <main className="wrap">
+    <>
       <TopBar />
-      <p className="small" style={{ margin: "0 0 10px" }}>
-        <Link href="/">← All live IPOs</Link>
-      </p>
+      <main className="wrap">
+        <nav className="crumbs" aria-label="Breadcrumb">
+          <Link href="/">Live IPOs</Link>
+          <span aria-hidden>/</span>
+          <span style={{ color: "var(--ink-2)" }}>{shortName}</span>
+        </nav>
 
-      <div className="issue-head">
-        <div style={{ minWidth: 0 }}>
-          <p className="eyebrow">Mainboard{i.exchanges ? ` · ${i.exchanges}` : ""}</p>
-          <h1>{i.name}</h1>
-          <div className="meta">
-            <StageChip stage={stage} />
-            <StatusChip status={i.status} />
-            {digest && i.status !== "notified" ? <span className="chip amber">In today&apos;s digest</span> : null}
+        <div className="issue-head">
+          <div className="issue-id">
+            <Avatar name={i.name} size="lg" />
+            <div style={{ minWidth: 0 }}>
+              <h1>{shortName}</h1>
+              <div className="meta">{meta.join(" · ")}</div>
+              <div className="badges">
+                <StageBadge stage={stage} />
+                {digest ? <RadarBadge sticky={sticky} /> : null}
+                <StatusBadge status={i.status} />
+              </div>
+            </div>
+          </div>
+          {canDecide ? <DecisionButtons slug={i.slug} status={i.status} note={i.note} /> : null}
+        </div>
+
+        <div className="metrics">
+          {listed ? (
+            <div className="metric">
+              <div className="label">Listing gain</div>
+              <div className={`value ${i.listing_gain_pct! >= 0 ? "up" : "down"}`}>
+                {i.listing_gain_pct! >= 0 ? "+" : ""}
+                {pct(i.listing_gain_pct)}
+              </div>
+              <div className="sub">{rupees(i.listing_open)} at the {i.price_basis ?? "open"}</div>
+            </div>
+          ) : null}
+          <div className="metric">
+            <div className="label">GMP</div>
+            <div className={`value ${sticky ? "warn" : "accent"}`}>{latest ? pct(latest.gmp_pct) : "–"}</div>
+            <div className="sub">
+              {latest ? rupees(latest.gmp_amount) : "no quote yet"}
+              {delta !== null && Math.abs(delta) >= 0.05 ? (
+                <span className={delta > 0 ? "up" : "down"}>
+                  {" "}
+                  · {delta > 0 ? "▲" : "▼"} {Math.abs(delta).toFixed(1)} pts today
+                </span>
+              ) : latest ? " · flat today" : ""}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="label">Issue size</div>
+            <div className="value">{crore(i.issue_size_cr)}</div>
+            <div className="sub">{sizeSplit(i.fresh_issue_cr, i.ofs_cr)}</div>
+          </div>
+          <div className="metric">
+            <div className="label">1 lot</div>
+            <div className="value">{rupees(oneLot, 0)}</div>
+            <div className="sub">{i.lot_size ? `${i.lot_size} shares at ${rupees(i.price_band_high)}` : ""}</div>
+          </div>
+          <div className="metric">
+            <div className="label">Subscribed</div>
+            <div className="value">{sub ? times(sub.total_x) : "–"}</div>
+            <div className="sub">
+              {sub
+                ? `retail ${times(sub.rii_x)} · QIB ${times(sub.qib_x)}`
+                : stage.key === "upcoming" || stage.key === "tomorrow"
+                  ? `bidding opens ${fmtDate(i.open_date)}`
+                  : "no reading yet"}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="label">P/E</div>
+            <div className="value">{i.pe_ratio ? i.pe_ratio.toFixed(1) : "–"}</div>
+            <div className="sub">
+              {detail?.kpis?.pe_post !== undefined ? `${detail.kpis.pe_post} post-issue` : "at the upper band"}
+            </div>
           </div>
         </div>
-        {canDecide ? <DecisionButtons slug={i.slug} status={i.status} note={i.note} /> : null}
-      </div>
 
-      <div className="stats">
-        {listed ? (
-          <div className="stat">
-            <div className="label">Listing gain</div>
-            <div className={`value ${i.listing_gain_pct! >= 0 ? "up" : "down"}`}>
-              {i.listing_gain_pct! >= 0 ? "+" : ""}
-              {pct(i.listing_gain_pct)}
-            </div>
-            <div className="sub">
-              {rupees(i.listing_open)} at the {i.price_basis ?? "open"}
-            </div>
+        {sticky ? (
+          <div className="warn-line">
+            GMP peaked at {pct(i.peak_since_t1)} after the day before opening and has fallen below {TRIGGER_PCT}%. It stays on your
+            radar until you mark it.
           </div>
         ) : null}
-        <div className="stat">
-          <div className="label">GMP</div>
-          <div className={`value ${sticky ? "amber" : "accent"}`}>{latest ? pct(latest.gmp_pct) : "–"}</div>
-          <div className="sub">
-            {latest ? rupees(latest.gmp_amount) : ""}
-            {delta !== null && Math.abs(delta) >= 0.05 ? (
-              <span className={delta > 0 ? "up" : "down"}>
-                {" "}
-                · {delta > 0 ? "▲" : "▼"} {Math.abs(delta).toFixed(1)} pts today
-              </span>
-            ) : latest ? " · flat today" : ""}
+
+        <div className="card section">
+          <div className="stepper">
+            {steps.map(([k, d]) => (
+              <div key={k} className={`step ${d && d < today ? "done" : ""} ${d === today ? "today" : ""}`}>
+                <span className="pin" aria-hidden />
+                <div className="k">{k}</div>
+                <div className="v">{d ? fmtDate(d, true) : "–"}</div>
+              </div>
+            ))}
           </div>
         </div>
-        <div className="stat">
-          <div className="label">Issue size</div>
-          <div className="value">{crore(i.issue_size_cr)}</div>
-          <div className="sub">{sizeSplit(i.fresh_issue_cr, i.ofs_cr)}</div>
-        </div>
-        <div className="stat">
-          <div className="label">1 lot</div>
-          <div className="value">{rupees(oneLot, 0)}</div>
-          <div className="sub">{i.lot_size ? `${i.lot_size} shares at ${rupees(i.price_band_high)} · band ${band(i.price_band_low, i.price_band_high)}` : band(i.price_band_low, i.price_band_high)}</div>
-        </div>
-        <div className="stat">
-          <div className="label">Subscribed</div>
-          <div className="value">{sub ? times(sub.total_x) : "–"}</div>
-          <div className="sub">
-            {sub
-              ? `retail ${times(sub.rii_x)} · QIB ${times(sub.qib_x)}`
-              : stage.key === "upcoming" || stage.key === "tomorrow"
-                ? `bidding opens ${fmtDate(i.open_date)}`
-                : "no reading yet"}
-          </div>
-        </div>
-        <div className="stat">
-          <div className="label">P/E</div>
-          <div className="value">{i.pe_ratio ? i.pe_ratio.toFixed(1) : "–"}</div>
-          <div className="sub">at the upper band</div>
-        </div>
-      </div>
 
-      {sticky ? (
-        <p className="warn-text small" style={{ margin: "10px 2px 0" }}>
-          GMP peaked at {pct(i.peak_since_t1)} after the day before opening and has fallen below {TRIGGER_PCT}% — it stays in the
-          digest until you mark it.
-        </p>
-      ) : null}
+        <nav className="subnav" aria-label="On this page">
+          <a href="#gmp">GMP</a>
+          <a href="#subscription">Subscription</a>
+          <a href="#anchor">Anchor book</a>
+          {detail?.financials || detail?.kpis ? <a href="#financials">Financials</a> : null}
+          {detail?.peers?.rows?.length ? <a href="#peers">Peers</a> : null}
+          {detail?.objects?.length ? <a href="#objects">Use of funds</a> : null}
+          <a href="#documents">Documents</a>
+        </nav>
 
-      <div className="card section">
-        <div className="timeline">
-          {timeline.map(([k, d]) => (
-            <div key={k} className={`tl ${d && d < today ? "done" : ""} ${d === today ? "today" : ""}`}>
-              <div className="k">{k}</div>
-              <div className="v">{d ? fmtDate(d, true) : "–"}</div>
+        <div className="grid-main section" style={{ marginTop: 8 }}>
+          <section className="card" id="gmp">
+            <div className="card-head">
+              <h2>GMP history</h2>
+              <span className="sub">% of the upper price band</span>
             </div>
-          ))}
-        </div>
-      </div>
-
-      <nav className="pagenav" aria-label="On this page">
-        <a href="#gmp">GMP</a>
-        <a href="#subscription">Subscription</a>
-        <a href="#anchor">Anchor book</a>
-        {detail?.financials || detail?.kpis ? <a href="#financials">Financials</a> : null}
-        {detail?.peers?.rows?.length ? <a href="#peers">Peers</a> : null}
-        {detail?.objects?.length ? <a href="#objects">Use of funds</a> : null}
-        <a href="#documents">Documents</a>
-      </nav>
-
-      <div className="grid2 section">
-        <div className="card" id="gmp">
-          <h2>GMP history</h2>
-          <p className="small muted" style={{ marginTop: -6 }}>
-            % of the upper price band.{" "}
-            {latest ? `Latest ${LABEL[latest.source]} ${fmtWhen(latest.observed_at, today)}` : ""}
-            {otherLatest ? ` · IPO Watch ${pct(otherLatest.gmp_pct)} ${fmtWhen(otherLatest.observed_at, today)}` : ""}
-          </p>
-          <GmpChart
-            series={series}
-            threshold={TRIGGER_PCT}
-            windowStart={i.open_date ? istMidnight(i.open_date) : null}
-            windowEnd={i.close_date ? istMidnight(addDays(i.close_date, 1)) : null}
-          />
-          <details>
-            <summary>Show readings as a table ({gmp.length})</summary>
-            <div className="scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>When (IST)</th>
-                    <th>Source</th>
-                    <th className="r">GMP</th>
-                    <th className="r">%</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...gmp].reverse().map((p, k) => (
-                    <tr key={k}>
-                      <td>{fmtDateTime(p.observed_at)}{p.capture_mode === "backfill" ? " *" : ""}</td>
-                      <td>{LABEL[p.source]}</td>
-                      <td className="r">{rupees(p.gmp_amount)}</td>
-                      <td className="r">{pct(p.gmp_pct)}</td>
+            <GmpChart
+              series={series}
+              threshold={TRIGGER_PCT}
+              windowStart={i.open_date ? istMidnight(i.open_date) : null}
+              windowEnd={i.close_date ? istMidnight(addDays(i.close_date, 1)) : null}
+            />
+            <p className="xs muted" style={{ marginTop: 10 }}>
+              {latest ? `Latest ${LABEL[latest.source]} ${fmtWhen(latest.observed_at, today)}` : ""}
+              {otherLatest ? ` · IPO Watch ${pct(otherLatest.gmp_pct)} ${fmtWhen(otherLatest.observed_at, today)}` : ""}
+            </p>
+            <details className="more">
+              <summary>All readings ({gmp.length})</summary>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>When (IST)</th>
+                      <th>Source</th>
+                      <th className="r">GMP</th>
+                      <th className="r">%</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              <p className="small muted">* read from the site after the fact, not captured live.</p>
-            </div>
-          </details>
-        </div>
+                  </thead>
+                  <tbody>
+                    {[...gmp].reverse().map((p, k) => (
+                      <tr key={k}>
+                        <td>
+                          {fmtDateTime(p.observed_at)}
+                          {p.capture_mode === "backfill" ? " *" : ""}
+                        </td>
+                        <td>{LABEL[p.source]}</td>
+                        <td className="r">{rupees(p.gmp_amount)}</td>
+                        <td className="r">{pct(p.gmp_pct)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="xs muted" style={{ marginTop: 8 }}>* read from the site after the fact, not captured live.</p>
+              </div>
+            </details>
+          </section>
 
-        <div style={{ display: "grid", gap: 18, alignContent: "start" }}>
-          <div className="card" id="subscription">
-            <h2>Subscription</h2>
+          <section className="card" id="subscription">
+            <div className="card-head">
+              <h2>Subscription</h2>
+              {sub ? <span className="sub">as of {fmtWhen(sub.observed_at, today)}</span> : null}
+            </div>
             {sub ? (
               <>
                 <SubBars sub={sub} />
-                <p className="small muted" style={{ margin: "10px 0 0" }}>
-                  Times subscribed, as of {fmtWhen(sub.observed_at, today)}.
-                </p>
                 {subs.length > 1 ? (
-                  <details>
+                  <details className="more">
                     <summary>How it built up ({subs.length} readings)</summary>
-                    <div className="scroll">
+                    <div className="table-wrap">
                       <table>
                         <thead>
                           <tr>
@@ -288,77 +306,98 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
                 ) : null}
               </>
             ) : (
-              <p className="muted small" style={{ margin: 0 }}>
+              <p className="muted small">
                 {stage.key === "upcoming" || stage.key === "tomorrow"
                   ? `Starts when bidding opens${i.open_date ? ` on ${fmtDate(i.open_date, true)}` : ""}.`
                   : "No live subscription readings for this issue."}
               </p>
             )}
-          </div>
+          </section>
         </div>
-      </div>
 
-      <AnchorBook detail={detail} issueSizeCr={i.issue_size_cr} />
-      <Financials detail={detail} />
-      <Peers detail={detail} companyName={i.name} />
-      <Objects detail={detail} />
+        <AnchorBook detail={detail} issueSizeCr={i.issue_size_cr} />
+        <Financials detail={detail} />
+        <Peers detail={detail} companyName={i.name} />
+        <Objects detail={detail} />
 
-      <div className="grid3 section">
-          <div className="card" id="documents">
-            <h2>Documents</h2>
+        <div className="grid-3 section">
+          <section className="card" id="documents">
+            <div className="card-head">
+              <h2>Documents &amp; sources</h2>
+            </div>
             <div className="links">
-              {i.rhp_url ? <a href={i.rhp_url} target="_blank" rel="noreferrer">Red herring prospectus (RHP) ↗</a> : null}
+              {i.rhp_url ? (
+                <a href={i.rhp_url} target="_blank" rel="noreferrer">
+                  <span>Red herring prospectus</span>
+                  <span>↗</span>
+                </a>
+              ) : null}
               {i.anchor_report_url ? (
                 <a href={i.anchor_report_url} target="_blank" rel="noreferrer">
-                  Anchor allocation{i.anchor_date && i.anchor_date > today ? ` (due ${fmtDate(i.anchor_date)})` : ""} ↗
+                  <span>Anchor allocation (PDF)</span>
+                  <span>↗</span>
                 </a>
-              ) : (
-                <span className="muted small">Anchor book {i.anchor_date ? `due ${fmtDate(i.anchor_date)}` : "not published yet"}</span>
-              )}
-              {i.investorgain_url ? <a href={i.investorgain_url} target="_blank" rel="noreferrer">InvestorGain page ↗</a> : null}
-              {i.ipowatch_url ? <a href={i.ipowatch_url} target="_blank" rel="noreferrer">IPO Watch GMP page ↗</a> : null}
+              ) : null}
+              {i.investorgain_url ? (
+                <a href={i.investorgain_url} target="_blank" rel="noreferrer">
+                  <span>InvestorGain</span>
+                  <span>↗</span>
+                </a>
+              ) : null}
+              {i.ipowatch_url ? (
+                <a href={i.ipowatch_url} target="_blank" rel="noreferrer">
+                  <span>IPO Watch GMP</span>
+                  <span>↗</span>
+                </a>
+              ) : null}
             </div>
-          </div>
+          </section>
 
           {history && history.n > 0 && refGmp !== null ? (
-            <div className="card">
-              <h2>What history says</h2>
-              <p style={{ margin: 0 }}>
+            <section className="card">
+              <div className="card-head">
+                <h2>What history says</h2>
+              </div>
+              <p>
                 Past IPOs with a day-before GMP of <b>{history.label}</b> opened a median{" "}
                 <b className={history.median! >= 0 ? "up" : "down"}>
                   {history.median! >= 0 ? "+" : ""}
                   {pct(history.median)}
                 </b>
-                , and {Math.round(history.positive ?? 0)}% opened above the issue price.
+                ; {Math.round(history.positive ?? 0)}% opened above the issue price.
               </p>
-              <p className="small muted" style={{ margin: "8px 0 0" }}>
-                {history.n} mainboard issues since 2023, compared on {t1 ? "this issue's frozen day-before GMP" : "the current GMP"} ({pct(refGmp)}).
-                Context, not a forecast.
+              <p className="xs muted" style={{ marginTop: 8 }}>
+                {history.n} mainboard issues since 2023, compared on{" "}
+                {t1 ? "this issue's frozen day-before GMP" : "the current GMP"} ({pct(refGmp)}). Context, not a forecast.
               </p>
-            </div>
+            </section>
           ) : null}
 
           {t1 || closeSnap ? (
-            <div className="card">
-              <h2>Frozen for calibration</h2>
-              <div className="small" style={{ display: "grid", gap: 6 }}>
+            <section className="card">
+              <div className="card-head">
+                <h2>Frozen for calibration</h2>
+              </div>
+              <div className="small" style={{ display: "grid", gap: 8 }}>
                 {t1 ? (
                   <div>
-                    <b>Day before opening:</b> GMP {pct(t1.gmp_pct)}
-                    <span className="muted"> · {String(t1.extras?.source ?? "").replace("-", " ")}</span>
+                    <div className="muted xs">Day before opening</div>
+                    GMP {pct(t1.gmp_pct)}
                   </div>
                 ) : null}
                 {closeSnap ? (
                   <div>
-                    <b>Close day:</b> {times(closeSnap.sub_total_x)} total, retail {times(closeSnap.sub_rii_x)}
-                    {closeSnap.gmp_pct !== null ? `, GMP ${pct(closeSnap.gmp_pct)}` : ""}
-                    <span className="muted"> · decision {String(closeSnap.extras?.decision ?? "–")}</span>
+                    <div className="muted xs">Close day</div>
+                    {times(closeSnap.sub_total_x)} total, retail {times(closeSnap.sub_rii_x)}
+                    {closeSnap.gmp_pct !== null ? `, GMP ${pct(closeSnap.gmp_pct)}` : ""} · decision{" "}
+                    {String(closeSnap.extras?.decision ?? "–")}
                   </div>
                 ) : null}
               </div>
-            </div>
+            </section>
           ) : null}
-      </div>
-    </main>
+        </div>
+      </main>
+    </>
   );
 }

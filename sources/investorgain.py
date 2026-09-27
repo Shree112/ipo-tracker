@@ -401,7 +401,7 @@ def _objects(html: str | None) -> list | None:
         return None
     out = []
     for r in [_cells(tr) for tr in t.find_all("tr")][1:]:
-        if len(r) >= 2 and r[1]:
+        if len(r) >= 2 and r[1] and not re.match(r"(?i)total\b", r[1].strip()):
             out.append({"object": r[1], "amount_cr": _f(r[2]) if len(r) > 2 else None})
     return out or None
 

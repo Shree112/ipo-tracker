@@ -21,17 +21,17 @@ export default function DecisionButtons({ slug, status, note }: { slug: string; 
         <>
           <span className="small muted">
             Marked <b style={{ color: "var(--ink)" }}>{status}</b>
-            {note ? ` · ${note}` : ""} — it won&apos;t appear in the digest.
+            {note ? ` · ${note}` : ""}
           </span>
-          <button className="btn link" type="submit" name="decision" value="undo">
+          <button className="btn ghost" type="submit" name="decision" value="undo">
             Undo
           </button>
         </>
       ) : (
         <>
-          <Submit decision="applied" label="Applied" primary />
+          <input className="input" name="note" placeholder="Note (optional)" maxLength={200} aria-label="Note" />
           <Submit decision="skipped" label="Skip" />
-          <input className="note-input" name="note" placeholder="Note (optional)" maxLength={200} aria-label="Note" />
+          <Submit decision="applied" label="Mark applied" primary />
         </>
       )}
     </form>

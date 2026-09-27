@@ -23,7 +23,7 @@ export function AnchorBook({ detail, issueSizeCr }: { detail: IssueDetail | null
     return (
       <section className="card section" id="anchor">
         <h2>Anchor book</h2>
-        <p className="muted small" style={{ margin: 0 }}>
+        <p className="muted small" style={{ marginTop: 6 }}>
           Not published yet. The anchor allocation usually lands the working day before the issue opens.
         </p>
       </section>
@@ -52,30 +52,37 @@ export function AnchorBook({ detail, issueSizeCr }: { detail: IssueDetail | null
     </tr>
   );
 
+  const mfTop = segments.slice(0, 2).map((c) => `${c.pct.toFixed(0)}% ${c.label.split(" /")[0].toLowerCase()}`).join(" · ");
   return (
-    <section className="card section" id="anchor">
-      <div className="section-head">
-        <h2 style={{ margin: 0 }}>Anchor book</h2>
-        <span className="muted small">
-          {a.bid_date ? `Bid ${a.bid_date}` : ""}
-          {a.price ? ` · at ₹${a.price}` : ""}
-          {a.pct_of_qib ? ` · ${a.pct_of_qib}% of the QIB portion` : ""}
+    <details className="card section fold" id="anchor">
+      <summary>
+        <div className="grow">
+          <h2>Anchor book</h2>
+          <div className="chips">
+            <span className="chip"><b>{crore(s.total_cr)}</b> raised</span>
+            <span className="chip"><b>{s.investors}</b> investors</span>
+            <span className="chip">top 5 took <b>{s.top5_pct.toFixed(0)}%</b></span>
+            <span className="chip">{mfTop}</span>
+          </div>
+        </div>
+        <span className="caret" aria-hidden>
+          <svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 5l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </span>
-      </div>
+      </summary>
 
-      <div className="mini-stats">
+      <div className="mini">
         <div>
           <div className="label">Raised</div>
           <div className="value">{crore(s.total_cr)}</div>
           <div className="sub">{issueSizeCr ? `${Math.round((s.total_cr / issueSizeCr) * 100)}% of the issue` : ""}</div>
         </div>
         <div>
-          <div className="label">Investors</div>
-          <div className="value">{s.investors}</div>
-          <div className="sub">in the book</div>
+          <div className="label">Bid</div>
+          <div className="value">{a.price ? `₹${a.price}` : "–"}</div>
+          <div className="sub">{a.bid_date ?? ""}</div>
         </div>
         <div>
-          <div className="label">Top 5 take</div>
+          <div className="label">Top 5 took</div>
           <div className="value">{s.top5_pct.toFixed(0)}%</div>
           <div className="sub">of the anchor amount</div>
         </div>
@@ -91,7 +98,7 @@ export function AnchorBook({ detail, issueSizeCr }: { detail: IssueDetail | null
           <span key={c.key} style={{ width: `${c.pct}%`, background: c.color }} title={`${c.label}: ${c.pct}%`} />
         ))}
       </div>
-      <div className="legend" style={{ marginTop: 8 }}>
+      <div className="legend" style={{ marginTop: 10 }}>
         {segments.map((c) => (
           <span key={c.key}>
             <span className="swatch" style={{ background: c.color }} />
@@ -100,7 +107,7 @@ export function AnchorBook({ detail, issueSizeCr }: { detail: IssueDetail | null
         ))}
       </div>
 
-      <div className="scroll" style={{ marginTop: 12 }}>
+      <div className="table-wrap" style={{ marginTop: 10 }}>
         <table>
           <thead>
             <tr>
@@ -115,9 +122,9 @@ export function AnchorBook({ detail, issueSizeCr }: { detail: IssueDetail | null
         </table>
       </div>
       {investors.length > TOP ? (
-        <details>
-          <summary>Show the other {investors.length - TOP} investors</summary>
-          <div className="scroll">
+        <details className="more">
+          <summary>{investors.length - TOP} more investors</summary>
+          <div className="table-wrap">
             <table>
               <tbody>{investors.slice(TOP).map((inv, k) => row(inv, k + TOP))}</tbody>
             </table>
@@ -125,12 +132,12 @@ export function AnchorBook({ detail, issueSizeCr }: { detail: IssueDetail | null
         </details>
       ) : null}
 
-      <p className="small muted" style={{ margin: "12px 0 0" }}>
+      <p className="xs muted" style={{ marginTop: 14 }}>
         {detail?.anchor_lockin_30 ? `Half the anchor shares unlock ${fmtDate(detail.anchor_lockin_30, true)}` : ""}
         {detail?.anchor_lockin_90 ? `, the rest ${fmtDate(detail.anchor_lockin_90, true)}. ` : ". "}
         Investor type is inferred from the name, so treat it as approximate.
       </p>
-    </section>
+    </details>
   );
 }
 
@@ -166,13 +173,16 @@ export function Financials({ detail }: { detail: IssueDetail | null }) {
 
   return (
     <section className="card section" id="financials">
-      <h2>Financials &amp; valuation</h2>
+      <div className="card-head">
+        <h2>Financials &amp; valuation</h2>
+        <span className="sub">Restated, ₹ crore</span>
+      </div>
       {f ? (
-        <div className="scroll">
+        <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>{f.unit.replace("Amount in ", "")}</th>
+                <th>Period</th>
                 {f.periods.map((p) => (
                   <th key={p} className="r">
                     {p}
@@ -198,16 +208,14 @@ export function Financials({ detail }: { detail: IssueDetail | null }) {
       {kpis.length ? (
         <div className="kpis">
           {kpis.map(([label, v]) => (
-            <div key={label}>
+            <div key={label} className="kpi">
               <div className="label">{label}</div>
               <div className="value">{v}</div>
             </div>
           ))}
         </div>
       ) : null}
-      <p className="small muted" style={{ margin: "10px 0 0" }}>
-        Restated figures from the offer document. The first period may be a part-year.
-      </p>
+      <p className="xs muted" style={{ marginTop: 12 }}>From the offer document. The first period may be a part-year.</p>
     </section>
   );
 }
@@ -218,11 +226,11 @@ export function Peers({ detail, companyName }: { detail: IssueDetail | null; com
   const first = companyName.toLowerCase().split(" ")[0];
   return (
     <section className="card section" id="peers">
-      <div className="section-head">
-        <h2 style={{ margin: 0 }}>Listed peers</h2>
-        <span className="muted small">From the offer document{p.as_of ? ` · as on ${fmtDate(p.as_of)}` : ""}</span>
+      <div className="card-head">
+        <h2>Listed peers</h2>
+        <span className="sub">From the offer document{p.as_of ? ` · as on ${fmtDate(p.as_of)}` : ""}</span>
       </div>
-      <div className="scroll" style={{ marginTop: 10 }}>
+      <div className="table-wrap">
         <table>
           <thead>
             <tr>
@@ -249,7 +257,7 @@ export function Peers({ detail, companyName }: { detail: IssueDetail | null; com
           </tbody>
         </table>
       </div>
-      <p className="small muted" style={{ margin: "10px 0 0" }}>
+      <p className="xs muted" style={{ marginTop: 12 }}>
         The company picks this peer set itself. The issue&apos;s own P/E is blank here because it depends on the final price.
       </p>
     </section>
@@ -257,11 +265,15 @@ export function Peers({ detail, companyName }: { detail: IssueDetail | null; com
 }
 
 export function Objects({ detail }: { detail: IssueDetail | null }) {
-  const o = detail?.objects;
+  // the source table sometimes ends with a "Total" line - that's not an object
+  const o = detail?.objects?.filter((x) => !/^total\b/i.test(x.object.trim()));
   if (!o || !o.length) return null;
   return (
     <section className="card section" id="objects">
-      <h2>What the money is for</h2>
+      <div className="card-head">
+        <h2>Use of funds</h2>
+        <span className="sub">Fresh-issue proceeds</span>
+      </div>
       <ol className="objects">
         {o.map((x, k) => (
           <li key={k}>
@@ -270,7 +282,7 @@ export function Objects({ detail }: { detail: IssueDetail | null }) {
           </li>
         ))}
       </ol>
-      <p className="small muted" style={{ margin: "8px 0 0" }}>Fresh-issue proceeds only; OFS money goes to the selling shareholders.</p>
+      <p className="xs muted" style={{ marginTop: 12 }}>OFS money goes to the selling shareholders, not the company.</p>
     </section>
   );
 }

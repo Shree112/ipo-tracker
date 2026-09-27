@@ -5,7 +5,8 @@
 #   DATABASE_URL     the same Session pooler string as .env
 #   RESEND_API_KEY   from resend.com -> API Keys
 #   DIGEST_TO        ahuja.shree31@gmail.com
-#   SITE_URL         the Vercel address, e.g. https://ipo-copilot-xyz.vercel.app
+#   SITE_URL         the Vercel address, e.g. https://ipo-tracker-teal.vercel.app
+#   LINK_SECRET      any long random string; the SAME value goes in Vercel's env vars
 name: live
 
 on:
@@ -46,3 +47,4 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           DIGEST_TO: ${{ secrets.DIGEST_TO }}
           SITE_URL: ${{ secrets.SITE_URL }}
+          LINK_SECRET: ${{ secrets.LINK_SECRET }}

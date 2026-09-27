@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "geist": "^1.7.2",
     "next": "15.5.26",
     "postgres": "3.4.9",
     "react": "19.3.0",

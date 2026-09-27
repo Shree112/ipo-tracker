@@ -174,7 +174,7 @@ export default function GmpChart({ series, windowStart, windowEnd, threshold }: 
           ))}
 
           {/* trigger line */}
-          <line x1={PAD.l} x2={W - PAD.r} y1={y(threshold)} y2={y(threshold)} stroke="var(--amber)" strokeWidth={1} />
+          <line x1={PAD.l} x2={W - PAD.r} y1={y(threshold)} y2={y(threshold)} stroke="var(--warn)" strokeWidth={1} />
           <text x={W - PAD.r + 6} y={y(threshold) + 4} fontSize="11" fill="var(--ink-3)">
             {threshold}% trigger
           </text>
