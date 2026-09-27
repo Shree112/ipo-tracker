@@ -322,3 +322,25 @@ ALTER TABLE subscription ADD COLUMN IF NOT EXISTS shni_x numeric(10,3);
 ALTER TABLE subscription ADD COLUMN IF NOT EXISTS bhni_x numeric(10,3);
 ALTER TABLE subscription ADD COLUMN IF NOT EXISTS raw    jsonb;
 ALTER TABLE issues       ADD COLUMN IF NOT EXISTS pe_ratio numeric(10,2);
+
+
+-- ============================================================
+-- issue_detail - the per-issue research block, refreshed each run from
+-- the InvestorGain issue page: anchor book (with an inferred investor
+-- category), restated financials, the RHP's listed-peer table, objects of
+-- the issue, and KPIs. One row per issue, overwritten as it firms up
+-- (the anchor book only appears the day before opening).
+-- ============================================================
+CREATE TABLE IF NOT EXISTS issue_detail (
+  issue_id          bigint PRIMARY KEY REFERENCES issues(id) ON DELETE CASCADE,
+  anchor            jsonb,
+  anchor_summary    jsonb,
+  anchor_lockin_30  date,
+  anchor_lockin_90  date,
+  financials        jsonb,
+  peers             jsonb,
+  objects           jsonb,
+  kpis              jsonb,
+  source            text NOT NULL DEFAULT 'investorgain',
+  updated_at        timestamptz NOT NULL DEFAULT now()
+);

@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sources import base  # noqa: E402
 from sources import investorgain as ig  # noqa: E402
 from sources import ipowatch as iw  # noqa: E402
+from sources import anchor as anchor_mod  # noqa: E402
 
 TRIGGER_PCT = 10.0
 
@@ -121,6 +122,7 @@ def write_investorgain(conn, issues: list[dict], log) -> dict[int, int]:
             site_status=rec["site_status"], withdrawn=rec["withdrawn"],
         )
         ids[rec["ig_id"]] = issue_id
+        write_detail(conn, issue_id, rec.get("detail"))
         log.written += 1  # the issue row itself; 'empty' should mean no issues found
         with conn.cursor() as cur:
             for g in rec["gmp"]:
@@ -138,6 +140,35 @@ def write_investorgain(conn, issues: list[dict], log) -> dict[int, int]:
                 log.written += cur.rowcount
                 log.gmp_new = getattr(log, "gmp_new", 0) + cur.rowcount
     return ids
+
+
+def write_detail(conn, issue_id: int, d: dict | None) -> None:
+    """Upsert the research block. A section that comes back empty keeps the
+    previous value rather than wiping it (a page hiccup shouldn't erase an
+    anchor book we already have)."""
+    if not d:
+        return
+    summary = anchor_mod.summarise(d.get("anchor"))  # also tags each investor's category
+    J = lambda x: json.dumps(x) if x is not None else None
+    with conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO issue_detail (issue_id, anchor, anchor_summary, anchor_lockin_30, anchor_lockin_90,
+                                         financials, peers, objects, kpis, updated_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
+               ON CONFLICT (issue_id) DO UPDATE SET
+                 anchor           = COALESCE(EXCLUDED.anchor, issue_detail.anchor),
+                 anchor_summary   = COALESCE(EXCLUDED.anchor_summary, issue_detail.anchor_summary),
+                 anchor_lockin_30 = COALESCE(EXCLUDED.anchor_lockin_30, issue_detail.anchor_lockin_30),
+                 anchor_lockin_90 = COALESCE(EXCLUDED.anchor_lockin_90, issue_detail.anchor_lockin_90),
+                 financials       = COALESCE(EXCLUDED.financials, issue_detail.financials),
+                 peers            = COALESCE(EXCLUDED.peers, issue_detail.peers),
+                 objects          = COALESCE(EXCLUDED.objects, issue_detail.objects),
+                 kpis             = COALESCE(EXCLUDED.kpis, issue_detail.kpis),
+                 updated_at       = now()""",
+            (issue_id, J(d.get("anchor") if summary else None), J(summary), d.get("anchor_lockin_30"),
+             d.get("anchor_lockin_90"), J(d.get("financials")), J(d.get("peers")), J(d.get("objects")),
+             J(d.get("kpis"))),
+        )
 
 
 def write_ipowatch(conn, rows: list[dict], issues: list[dict], log) -> list[str]:
@@ -192,12 +223,18 @@ def freeze_t_minus_1(conn, today: date) -> list[str]:
             if not pick:
                 frozen.append(f"{issue['name']}: NO GMP observed before open - snapshot skipped")
                 continue
+            cur.execute("SELECT anchor_summary FROM issue_detail WHERE issue_id = %s", (issue["id"],))
+            det = cur.fetchone()
+            anc = (det or {}).get("anchor_summary") or {}
             cur.execute(
-                """INSERT INTO signal_snapshot (issue_id, phase, taken_at, gmp_amount, gmp_pct, extras)
-                   VALUES (%s,'t_minus_1', now(), %s, %s, %s)
+                """INSERT INTO signal_snapshot (issue_id, phase, taken_at, gmp_amount, gmp_pct,
+                                                anchor_total_cr, anchor_mf_pct, anchor_top5_pct, extras)
+                   VALUES (%s,'t_minus_1', now(), %s, %s, %s, %s, %s, %s)
                    ON CONFLICT (issue_id, phase) DO NOTHING""",
-                (issue["id"], pick["gmp_amount"], pick["gmp_pct"], json.dumps({
+                (issue["id"], pick["gmp_amount"], pick["gmp_pct"],
+                 anc.get("total_cr"), anc.get("mf_pct"), anc.get("top5_pct"), json.dumps({
                     "source": f"{pick['source']}-live",
+                    "anchor_by_category_pct": anc.get("by_category_pct"),
                     "observed_at": pick["observed_at"].isoformat(),
                     "capture_mode": pick["capture_mode"],
                     "by_source": {s: {"gmp_amount": float(r["gmp_amount"]),

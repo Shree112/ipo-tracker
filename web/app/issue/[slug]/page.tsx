@@ -4,6 +4,7 @@ import TopBar from "@/components/TopBar";
 import GmpChart, { type Series } from "@/components/GmpChart";
 import DecisionButtons from "@/components/DecisionButtons";
 import { StageChip, StatusChip } from "@/components/Chips";
+import { AnchorBook, Financials, Objects, Peers } from "@/components/Research";
 import {
   addDays,
   band,
@@ -63,7 +64,7 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
   const { slug } = await params;
   const data = await getIssue(slug);
   if (!data) notFound();
-  const { issue: i, gmp, subs, snaps, history, refGmp } = data;
+  const { issue: i, gmp, subs, snaps, history, refGmp, detail } = data;
   const today = todayIST();
   const stage = stageOf(i.open_date, i.close_date, i.listing_date, today);
   const digest = inDigest(i, today);
@@ -195,8 +196,18 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
         </div>
       </div>
 
+      <nav className="pagenav" aria-label="On this page">
+        <a href="#gmp">GMP</a>
+        <a href="#subscription">Subscription</a>
+        <a href="#anchor">Anchor book</a>
+        {detail?.financials || detail?.kpis ? <a href="#financials">Financials</a> : null}
+        {detail?.peers?.rows?.length ? <a href="#peers">Peers</a> : null}
+        {detail?.objects?.length ? <a href="#objects">Use of funds</a> : null}
+        <a href="#documents">Documents</a>
+      </nav>
+
       <div className="grid2 section">
-        <div className="card">
+        <div className="card" id="gmp">
           <h2>GMP history</h2>
           <p className="small muted" style={{ marginTop: -6 }}>
             % of the upper price band.{" "}
@@ -238,7 +249,7 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
         </div>
 
         <div style={{ display: "grid", gap: 18, alignContent: "start" }}>
-          <div className="card">
+          <div className="card" id="subscription">
             <h2>Subscription</h2>
             {sub ? (
               <>
@@ -284,8 +295,16 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
               </p>
             )}
           </div>
+        </div>
+      </div>
 
-          <div className="card">
+      <AnchorBook detail={detail} issueSizeCr={i.issue_size_cr} />
+      <Financials detail={detail} />
+      <Peers detail={detail} companyName={i.name} />
+      <Objects detail={detail} />
+
+      <div className="grid3 section">
+          <div className="card" id="documents">
             <h2>Documents</h2>
             <div className="links">
               {i.rhp_url ? <a href={i.rhp_url} target="_blank" rel="noreferrer">Red herring prospectus (RHP) ↗</a> : null}
@@ -339,7 +358,6 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
               </div>
             </div>
           ) : null}
-        </div>
       </div>
     </main>
   );

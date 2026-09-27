@@ -22,6 +22,47 @@ export type SubPoint = {
   total_x: number | null;
 };
 
+export type AnchorInvestor = {
+  name: string;
+  shares: number | null;
+  amount_cr: number | null;
+  pct_of_anchor: number | null;
+  pct_of_issue: number | null;
+  category?: "mf" | "insurance" | "foreign" | "aif" | "other";
+};
+
+export type IssueDetail = {
+  anchor: {
+    bid_date?: string;
+    price?: number;
+    pct_of_qib?: number;
+    locked_30d_shares?: number;
+    locked_90d_shares?: number;
+    total_shares?: number;
+    total_amount_cr?: number;
+    investors: AnchorInvestor[];
+  } | null;
+  anchor_summary: {
+    total_cr: number;
+    investors: number;
+    top5_pct: number;
+    mf_pct: number;
+    by_category_pct: Record<string, number>;
+  } | null;
+  anchor_lockin_30: string | null;
+  anchor_lockin_90: string | null;
+  financials: { periods: string[]; rows: { metric: string; values: (number | null)[] }[]; unit: string } | null;
+  peers: { as_of: string | null; columns: string[]; rows: string[][] } | null;
+  objects: { object: string; amount_cr: number | null }[] | null;
+  kpis: Partial<Record<
+    | "roe" | "roce" | "debt_equity" | "ronw" | "pat_margin" | "nav" | "price_to_book"
+    | "eps_pre" | "eps_post" | "pe_pre" | "pe_post" | "market_cap_cr"
+    | "promoter_pre_pct" | "promoter_post_pct" | "ebitda_margin",
+    number
+  >> | null;
+  updated_at: Date;
+};
+
 export type IssueRow = {
   id: number;
   slug: string;
@@ -113,7 +154,7 @@ export async function getIssue(slug: string) {
   if (!rows.length) return null;
   const issue = normalise(rows[0]);
 
-  const [gmp, subs, snaps] = await Promise.all([
+  const [gmp, subs, snaps, details] = await Promise.all([
     sql<GmpPoint[]>`
       SELECT source, observed_at, gmp_amount, gmp_pct, capture_mode
       FROM gmp_history
@@ -126,7 +167,18 @@ export async function getIssue(slug: string) {
     sql<{ phase: string; gmp_pct: number | null; sub_total_x: number | null; sub_rii_x: number | null; taken_at: Date; extras: Record<string, unknown> | null }[]>`
       SELECT phase, gmp_pct, sub_total_x, sub_rii_x, taken_at, extras
       FROM signal_snapshot WHERE issue_id = ${issue.id} ORDER BY phase DESC`,
+    sql<IssueDetail[]>`
+      SELECT anchor, anchor_summary, anchor_lockin_30, anchor_lockin_90,
+             financials, peers, objects, kpis, updated_at
+      FROM issue_detail WHERE issue_id = ${issue.id}`,
   ]);
+  const detail = details[0]
+    ? {
+        ...details[0],
+        anchor_lockin_30: toISODate(details[0].anchor_lockin_30 as unknown as Date),
+        anchor_lockin_90: toISODate(details[0].anchor_lockin_90 as unknown as Date),
+      }
+    : null;
 
   // History for context: how issues with a similar day-before GMP opened.
   const refGmp =
@@ -135,7 +187,7 @@ export async function getIssue(slug: string) {
     null;
   const history = refGmp === null ? null : await baseRate(refGmp);
 
-  return { issue, gmp: [...gmp], subs: [...subs], snaps: [...snaps], history, refGmp };
+  return { issue, gmp: [...gmp], subs: [...subs], snaps: [...snaps], history, refGmp, detail };
 }
 
 const BANDS: [number, number, string][] = [

@@ -208,8 +208,14 @@ def fetch_live(*, use_cache: bool = False) -> list[dict[str, Any]]:
 
 
 def fetch_issue(url: str, *, use_cache: bool = False) -> dict[str, Any]:
-    rec = parse_issue(get_page(url, use_cache=use_cache))
+    html = get_page(url, use_cache=use_cache)
+    rec = parse_issue(html)
     rec["url"] = url
+    try:
+        rec["detail"] = parse_detail(html)
+    except Exception as exc:  # noqa: BLE001 - detail is a bonus; never lose the calendar/GMP over it
+        rec["detail"] = None
+        rec["detail_error"] = str(exc)[:120]
     return rec
 
 
@@ -263,3 +269,153 @@ def parse_subscription(html: str) -> list[dict[str, Any]]:
 
 def fetch_subscription(*, use_cache: bool = False) -> list[dict[str, Any]]:
     return parse_subscription(get_page(SUBSCRIPTION_URL, use_cache=use_cache))
+
+
+# ---------------------------------------------------------------- issue detail
+# The issue page also carries, as HTML blocks referenced from ipoData
+# ("$33" -> a "33:T<hexlen>,<html>" text row in the flight stream):
+#   anchor_investor_detail  the anchor book: bid date, price, lock-ins, and
+#                           one row per anchor investor
+#   financial               restated financials by period (Rs crore)
+#   peer_analysis           the RHP's listed-peer table (EPS, NAV, P/E, RoNW)
+#   issue_objects           objects of the issue with amounts
+# plus KPI fields directly on ipoData. None of it needs the RHP PDF.
+
+from bs4 import BeautifulSoup  # noqa: E402
+
+_KPI_FIELDS = {
+    "roe": "kpi_roe", "roce": "kpi_roce", "debt_equity": "kpi_debt_equity", "ronw": "kpi_ronw",
+    "pat_margin": "kpi_pat_margin", "nav": "nav", "price_to_book": "price_to_book_value",
+    "eps_pre": "kpi_eps", "eps_post": "kpi_eps_post", "pe_pre": "pe_ratio", "pe_post": "post_pe_ratio",
+    "market_cap_cr": "market_cap", "promoter_pre_pct": "promoter_shareholding_pre_issue",
+    "promoter_post_pct": "promoter_shareholding_post_issue", "ebitda_margin": "kpi_ebitda",
+}
+
+
+def _resolve(flight: str, v: Any) -> str | None:
+    """'$33' -> the HTML text row it points at; plain strings pass through."""
+    if not isinstance(v, str) or not v:
+        return None
+    if not re.fullmatch(r"\$[0-9a-f]+", v):
+        return v
+    m = re.search(re.escape(v[1:]) + r":T([0-9a-f]+),", flight)
+    if not m:
+        return None
+    n = int(m.group(1), 16)
+    return flight[m.end():].encode("utf-8")[:n].decode("utf-8", "replace")
+
+
+def _cells(tr) -> list[str]:
+    return [c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"])]
+
+
+def _f(s: str | None) -> float | None:
+    if s is None:
+        return None
+    m = re.search(r"-?\d[\d,]*(?:\.\d+)?", s)
+    return float(m.group(0).replace(",", "")) if m else None
+
+
+def _anchor(html: str | None) -> dict | None:
+    if not html:
+        return None
+    soup = BeautifulSoup(html, "lxml")
+    tables = soup.find_all("table")
+    out: dict[str, Any] = {"investors": []}
+    for t in tables:
+        rows = [_cells(tr) for tr in t.find_all("tr")]
+        if not rows:
+            continue
+        head = [h.lower() for h in rows[0]]
+        if any("anchor" in h for h in head) and any("amt" in h or "amount" in h for h in head):
+            idx = {h: k for k, h in enumerate(head)}
+            col = lambda *names: next((k for h, k in idx.items() if any(n in h for n in names)), None)
+            c_name, c_sh, c_amt = col("anchor"), col("shares"), col("amt", "amount")
+            c_pa, c_pi = col("% allocated"), col("of issue")
+            for r in rows[1:]:
+                # the closing total row is one cell short and has no name
+                if len(r) != len(head) or c_name is None or not re.search(r"[A-Za-z]", r[c_name]):
+                    if len(r) >= 3 and not any(re.search(r"[A-Za-z]{3}", x) for x in r):
+                        nums = [_f(x) for x in r if x]
+                        if len(nums) >= 2:
+                            out["total_shares"], out["total_amount_cr"] = nums[0], nums[1]
+                    continue
+                out["investors"].append({
+                    "name": r[c_name],
+                    "shares": _f(r[c_sh]) if c_sh is not None and c_sh < len(r) else None,
+                    "amount_cr": _f(r[c_amt]) if c_amt is not None and c_amt < len(r) else None,
+                    "pct_of_anchor": _f(r[c_pa]) if c_pa is not None and c_pa < len(r) else None,
+                    "pct_of_issue": _f(r[c_pi]) if c_pi is not None and c_pi < len(r) else None,
+                })
+        else:
+            for r in rows:
+                if len(r) == 2:
+                    k = r[0].lower()
+                    if "bid date" in k:
+                        out["bid_date"] = r[1]
+                    elif k == "price":
+                        out["price"] = _f(r[1])
+                    elif "% of qib" in k:
+                        out["pct_of_qib"] = _f(r[1])
+                    elif "30 days" in k:
+                        out["locked_30d_shares"] = _f(r[1])
+                    elif "90 days" in k:
+                        out["locked_90d_shares"] = _f(r[1])
+    return out if out["investors"] or len(out) > 1 else None
+
+
+def _financials(html: str | None) -> dict | None:
+    if not html:
+        return None
+    t = BeautifulSoup(html, "lxml").find("table")
+    if not t:
+        return None
+    rows = [_cells(tr) for tr in t.find_all("tr")]
+    if not rows or len(rows[0]) < 2:
+        return None
+    periods = rows[0][1:]
+    lines = [{"metric": r[0], "values": [_f(v) for v in r[1:1 + len(periods)]]}
+             for r in rows[1:] if len(r) == len(periods) + 1]
+    unit = next((r[0] for r in rows if len(r) == 1 and "crore" in r[0].lower()), "Amount in ₹ Crore")
+    return {"periods": periods, "rows": lines, "unit": unit} if lines else None
+
+
+def _peers(html: str | None, as_of: Any) -> dict | None:
+    if not html:
+        return None
+    t = BeautifulSoup(html, "lxml").find("table")
+    if not t:
+        return None
+    rows = [_cells(tr) for tr in t.find_all("tr")]
+    if len(rows) < 2:
+        return None
+    return {"as_of": str(as_of)[:10] if as_of else None, "columns": rows[0],
+            "rows": [r for r in rows[1:] if len(r) == len(rows[0])]}
+
+
+def _objects(html: str | None) -> list | None:
+    if not html:
+        return None
+    t = BeautifulSoup(html, "lxml").find("table")
+    if not t:
+        return None
+    out = []
+    for r in [_cells(tr) for tr in t.find_all("tr")][1:]:
+        if len(r) >= 2 and r[1]:
+            out.append({"object": r[1], "amount_cr": _f(r[2]) if len(r) > 2 else None})
+    return out or None
+
+
+def parse_detail(html: str) -> dict[str, Any]:
+    flight = flight_payload(html)
+    ipo = (_array(flight, "ipoData") or [None])[0] or {}
+    kpis = {k: _num(ipo.get(src)) for k, src in _KPI_FIELDS.items()}
+    return {
+        "anchor": _anchor(_resolve(flight, ipo.get("anchor_investor_detail"))),
+        "anchor_lockin_30": _iso_date(ipo.get("timetable_anchor_lockin_end_dt_1")),
+        "anchor_lockin_90": _iso_date(ipo.get("timetable_anchor_lockin_end_dt_2")),
+        "financials": _financials(_resolve(flight, ipo.get("financial"))),
+        "peers": _peers(_resolve(flight, ipo.get("peer_analysis")), ipo.get("peer_group_date")),
+        "objects": _objects(_resolve(flight, ipo.get("issue_objects"))),
+        "kpis": {k: v for k, v in kpis.items() if v is not None} or None,
+    }
