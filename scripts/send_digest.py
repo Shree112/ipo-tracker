@@ -33,6 +33,11 @@ import db  # noqa: E402
 from sources.ipowatch import IST  # noqa: E402
 
 TRIGGER_PCT = 10.0
+SITE_URL = os.getenv("SITE_URL", "").strip().rstrip("/")
+
+
+def page_url(i: dict) -> str | None:
+    return f"{SITE_URL}/issue/{i['slug']}" if SITE_URL else None
 STALE_HOURS = 36
 SOURCE_LABEL = {"investorgain": "InvestorGain", "ipowatch": "IPO Watch"}
 
@@ -257,7 +262,10 @@ def text_row(i: dict, today: date) -> list[str]:
     if i["rhp_url"]:
         links.append(f"RHP: {i['rhp_url']}")
     lines += [f"  {l}" for l in links]
-    lines.append(f'  Mark: python scripts\\mark.py "{i["slug"]}" applied')
+    if page_url(i):
+        lines.append(f"  Open / mark applied: {page_url(i)}")
+    else:
+        lines.append(f'  Mark: python scripts\\mark.py "{i["slug"]}" applied')
     return lines
 
 
@@ -312,8 +320,9 @@ def card(i: dict, today: date) -> str:
              + last)
 
     name = e(i["name"])
-    if i["investorgain_url"]:
-        name = f'<a href="{e(i["investorgain_url"])}" style="color:{C["ink"]};text-decoration:none;">{name}</a>'
+    target = page_url(i) or i["investorgain_url"]
+    if target:
+        name = f'<a href="{e(target)}" style="color:{C["ink"]};text-decoration:none;">{name}</a>'
     badge_bg, badge_fg = ((C["amber_soft"], C["amber"]) if i["block"] == "closes"
                           else (C["jade_soft"], C["jade"]))
     badge = (f'<span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;'
@@ -342,6 +351,13 @@ def card(i: dict, today: date) -> str:
         f'<a href="{e(u)}" style="color:{C["jade"]};font-weight:600;text-decoration:none;">{e(t)}</a>'
         for t, u in links)
 
+    if page_url(i):
+        action = (f'<div style="margin-top:12px;"><a href="{e(page_url(i))}" style="display:inline-block;'
+                  f'background:{C["jade"]};color:#ffffff;font-weight:700;font-size:14px;text-decoration:none;'
+                  f'padding:9px 16px;border-radius:6px;">Open &middot; mark applied or skip</a></div>')
+    else:
+        action = (f'<div style="font-size:11px;color:{C["muted"]};margin-top:10px;font-family:Consolas,Menlo,monospace;">'
+                  f'python scripts\\mark.py "{e(i["slug"])}" applied</div>')
     return f"""
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{C['card']};
   border:1px solid {C['rule']};border-radius:8px;margin:10px 0;">
@@ -356,12 +372,13 @@ def card(i: dict, today: date) -> str:
   <div style="font-size:13px;color:{C['ink']};margin-top:4px;">{srcs}</div>
   {sticky}
   <div style="font-size:13px;margin-top:10px;">{link_html}</div>
-  <div style="font-size:11px;color:{C['muted']};margin-top:10px;font-family:Consolas,Menlo,monospace;">
-    python scripts\\mark.py "{e(i['slug'])}" applied</div>
+  {action}
  </td></tr></table>"""
 
 
 def render_html(issues: list[dict], today: date) -> str:
+    all_link = (f' <a href="{html.escape(SITE_URL)}" style="color:{C["jade"]};">All live IPOs</a>'
+                if SITE_URL else "")
     counts = " · ".join(f"{sum(1 for i in issues if i['block'] == k)} {t.lower()}"
                         for k, t in BLOCKS if any(i["block"] == k for i in issues))
     parts = [f"""<div style="background:{C['page']};padding:16px 8px;font-family:{FONT};color:{C['ink']};">
@@ -380,7 +397,7 @@ def render_html(issues: list[dict], today: date) -> str:
     parts.append(f"""<div style="font-size:12px;color:{C['muted']};margin:18px 0 0;line-height:1.5;">
   GMP is unofficial and only the trigger for this mail, not a verdict. The big GMP figure is
   InvestorGain's (IPO Watch if it has none); the change is since yesterday's last reading.
-  Issues leave the digest when marked applied or skipped, or when they close.</div>
+  Issues leave the digest when marked applied or skipped, or when they close.{all_link}</div>
 </td></tr></table></div>""")
     return "".join(parts)
 

@@ -252,3 +252,21 @@ with the T-1 snapshot that is the calibration log's input side.
 The digest shows the latest subscription on each card, and P/E beside the
 price band.
 
+---
+
+## Web page (`web/`, Next.js on Vercel)
+
+- `/` - live mainboard IPOs grouped: on your radar (the digest's rule), open &
+  upcoming, closed awaiting listing, recently listed.
+- `/issue/<slug>` - GMP, size + fresh/OFS split, 1-lot amount, subscription by
+  category, P/E, dates, GMP history chart (both sources, 10% line, bidding
+  window), documents, what history says for this GMP band, the frozen
+  calibration snapshots, and **Applied / Skip / Undo** buttons (POST only).
+- One password (`SITE_PASSWORD`), remembered for 90 days per browser.
+
+Deploy once: Vercel -> Add New Project -> import the GitHub repo -> **Root
+Directory `web`** -> environment variables `DATABASE_URL` (Supabase **Transaction
+pooler**, port 6543) and `SITE_PASSWORD` -> Deploy. Every later `git push`
+redeploys by itself. Then put the Vercel address in the `SITE_URL` Actions
+secret so digest cards link to the page.
+

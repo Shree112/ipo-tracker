@@ -1,0 +1,192 @@
+import { db } from "./db";
+import { addDays, toISODate, todayIST } from "./format";
+
+export const TRIGGER_PCT = 10;
+
+export type GmpPoint = {
+  source: "investorgain" | "ipowatch";
+  observed_at: Date;
+  gmp_amount: number;
+  gmp_pct: number;
+  capture_mode: "live" | "backfill";
+};
+
+export type SubPoint = {
+  observed_at: Date;
+  qib_x: number | null;
+  nii_x: number | null;
+  shni_x: number | null;
+  bhni_x: number | null;
+  rii_x: number | null;
+  employee_x: number | null;
+  total_x: number | null;
+};
+
+export type IssueRow = {
+  id: number;
+  slug: string;
+  name: string;
+  open_date: string | null;
+  close_date: string | null;
+  anchor_date: string | null;
+  listing_date: string | null;
+  price_band_low: number | null;
+  price_band_high: number | null;
+  lot_size: number | null;
+  min_order_amount: number | null;
+  issue_size_cr: number | null;
+  fresh_issue_cr: number | null;
+  ofs_cr: number | null;
+  pe_ratio: number | null;
+  exchanges: string | null;
+  rhp_url: string | null;
+  anchor_report_url: string | null;
+  investorgain_url: string | null;
+  ipowatch_url: string | null;
+  status: string;
+  note: string | null;
+  gmp_latest: { source: string; gmp_pct: number; gmp_amount: number; observed_at: string }[] | null;
+  sub_latest: (Omit<SubPoint, "observed_at"> & { observed_at: string }) | null;
+  peak_since_t1: number | null;
+  listing_open: number | null;
+  listing_gain_pct: number | null;
+  price_basis: string | null;
+};
+
+const ISSUE_COLUMNS = `
+  i.id, i.slug, i.name, i.open_date, i.close_date, i.anchor_date, i.listing_date,
+  i.price_band_low, i.price_band_high, i.lot_size, i.min_order_amount,
+  i.issue_size_cr, i.fresh_issue_cr, i.ofs_cr, i.pe_ratio, i.exchanges,
+  i.rhp_url, i.anchor_report_url, i.investorgain_url, i.ipowatch_url,
+  COALESCE(st.status, '-') AS status, st.note,
+  (SELECT json_agg(x) FROM (
+     SELECT DISTINCT ON (source) source, gmp_pct, gmp_amount, observed_at
+     FROM gmp_history g WHERE g.issue_id = i.id AND g.gmp_pct IS NOT NULL
+     ORDER BY source, observed_at DESC) x) AS gmp_latest,
+  (SELECT row_to_json(s) FROM (
+     SELECT qib_x, nii_x, shni_x, bhni_x, rii_x, employee_x, total_x, observed_at
+     FROM subscription WHERE issue_id = i.id ORDER BY observed_at DESC LIMIT 1) s) AS sub_latest,
+  (SELECT max(gmp_pct) FROM gmp_history g
+     WHERE g.issue_id = i.id AND i.open_date IS NOT NULL
+       AND g.observed_at >= ((i.open_date - 1)::timestamp AT TIME ZONE 'Asia/Kolkata')) AS peak_since_t1,
+  lo.listing_open, lo.listing_gain_pct, lo.price_basis
+`;
+
+function normalise(r: Record<string, unknown>): IssueRow {
+  return {
+    ...(r as unknown as IssueRow),
+    open_date: toISODate(r.open_date as Date),
+    close_date: toISODate(r.close_date as Date),
+    anchor_date: toISODate(r.anchor_date as Date),
+    listing_date: toISODate(r.listing_date as Date),
+  };
+}
+
+/** Everything worth seeing now: upcoming, open, awaiting listing, listed in the last week. */
+export async function listIssues(): Promise<IssueRow[]> {
+  const today = todayIST();
+  const rows = await db().unsafe(
+    `SELECT ${ISSUE_COLUMNS}
+     FROM issues i
+     LEFT JOIN issue_status st ON st.issue_id = i.id
+     LEFT JOIN listing_outcome lo ON lo.issue_id = i.id
+     WHERE i.board = 'mainboard' AND COALESCE(i.withdrawn, false) = false
+       AND i.open_date IS NOT NULL
+       AND i.open_date <= $1::date + 30
+       AND COALESCE(i.listing_date, i.close_date + 7) >= $1::date - 7
+     ORDER BY i.open_date, i.name`,
+    [today],
+  );
+  return rows.map(normalise);
+}
+
+export async function getIssue(slug: string) {
+  const sql = db();
+  const rows = await sql.unsafe(
+    `SELECT ${ISSUE_COLUMNS}
+     FROM issues i
+     LEFT JOIN issue_status st ON st.issue_id = i.id
+     LEFT JOIN listing_outcome lo ON lo.issue_id = i.id
+     WHERE i.slug = $1`,
+    [slug],
+  );
+  if (!rows.length) return null;
+  const issue = normalise(rows[0]);
+
+  const [gmp, subs, snaps] = await Promise.all([
+    sql<GmpPoint[]>`
+      SELECT source, observed_at, gmp_amount, gmp_pct, capture_mode
+      FROM gmp_history
+      WHERE issue_id = ${issue.id} AND gmp_pct IS NOT NULL
+      ORDER BY observed_at`,
+    sql<SubPoint[]>`
+      SELECT observed_at, qib_x, nii_x, shni_x, bhni_x, rii_x, employee_x, total_x
+      FROM subscription WHERE issue_id = ${issue.id}
+      ORDER BY observed_at`,
+    sql<{ phase: string; gmp_pct: number | null; sub_total_x: number | null; sub_rii_x: number | null; taken_at: Date; extras: Record<string, unknown> | null }[]>`
+      SELECT phase, gmp_pct, sub_total_x, sub_rii_x, taken_at, extras
+      FROM signal_snapshot WHERE issue_id = ${issue.id} ORDER BY phase DESC`,
+  ]);
+
+  // History for context: how issues with a similar day-before GMP opened.
+  const refGmp =
+    snaps.find((s) => s.phase === "t_minus_1")?.gmp_pct ??
+    (issue.gmp_latest?.find((g) => g.source === "investorgain") ?? issue.gmp_latest?.[0])?.gmp_pct ??
+    null;
+  const history = refGmp === null ? null : await baseRate(refGmp);
+
+  return { issue, gmp: [...gmp], subs: [...subs], snaps: [...snaps], history, refGmp };
+}
+
+const BANDS: [number, number, string][] = [
+  [-1000, 0, "below 0%"],
+  [0, 5, "0–5%"],
+  [5, 10, "5–10%"],
+  [10, 20, "10–20%"],
+  [20, 40, "20–40%"],
+  [40, 10000, "40% or more"],
+];
+
+export async function baseRate(gmpPct: number) {
+  const band = BANDS.find(([lo, hi]) => gmpPct >= lo && gmpPct < hi) ?? BANDS[BANDS.length - 1];
+  const [r] = await db()<{ n: number; med: number | null; pos: number | null }[]>`
+    SELECT count(*)::int AS n,
+           percentile_cont(0.5) WITHIN GROUP (ORDER BY actual_gain_pct) AS med,
+           100.0 * avg((actual_gain_pct > 0)::int) AS pos
+    FROM calibration
+    WHERE phase = 't_minus_1' AND price_basis = 'open'
+      AND predicted_gain_pct >= ${band[0]} AND predicted_gain_pct < ${band[1]}`;
+  return { label: band[2], n: r.n, median: r.med, positive: r.pos };
+}
+
+export type Decision = "applied" | "skipped" | "undo";
+
+export async function setDecision(slug: string, decision: Decision, note: string | null) {
+  const sql = db();
+  const [issue] = await sql<{ id: number }[]>`SELECT id FROM issues WHERE slug = ${slug}`;
+  if (!issue) throw new Error("unknown issue");
+  if (decision === "undo") {
+    await sql`
+      UPDATE issue_status
+      SET status = CASE WHEN first_notified_at IS NULL THEN 'eligible' ELSE 'notified' END,
+          resolved_at = NULL
+      WHERE issue_id = ${issue.id}`;
+    return;
+  }
+  await sql`
+    INSERT INTO issue_status (issue_id, status, resolved_at, note)
+    VALUES (${issue.id}, ${decision}, now(), ${note})
+    ON CONFLICT (issue_id) DO UPDATE
+      SET status = EXCLUDED.status, resolved_at = now(),
+          note = COALESCE(EXCLUDED.note, issue_status.note)`;
+}
+
+/** The digest's membership rule, so the site and the email agree. */
+export function inDigest(i: IssueRow, today: string): boolean {
+  if (!i.open_date || !i.close_date) return false;
+  if (today < addDays(i.open_date, -1) || today > i.close_date) return false;
+  if (i.status === "applied" || i.status === "skipped") return false;
+  const current = (i.gmp_latest ?? []).map((g) => g.gmp_pct);
+  const peak = Math.max(i.peak_since_t1 ?? -Infinity, ...current);
+  return i.status === "notified" || peak > TRIGGER_PCT;
+}
