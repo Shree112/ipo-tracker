@@ -281,7 +281,7 @@ def write_subscription(conn, subs: list[dict], log) -> int:
                                              employee_x, total_x, shni_x, bhni_x, raw)
                    VALUES (%s,%s,'investorgain',%s,%s,%s,%s,%s,%s,%s,%s)
                    ON CONFLICT (issue_id, source, observed_at) DO NOTHING""",
-                (issue_id, fetched_at, s.get("qib_x"), s.get("nii_x"), s.get("rii_x"),
+                (issue_id, s.get("observed_at") or fetched_at, s.get("qib_x"), s.get("nii_x"), s.get("rii_x"),
                  s.get("employee_x"), s.get("total_x"), s.get("shni_x"), s.get("bhni_x"),
                  json.dumps({**s["raw"], "site_updated": s["site_updated"]})),
             )
@@ -395,13 +395,136 @@ def board(issues: list[dict], iw_rows: list[dict], today: date) -> None:
               f"{fx((i.get('sub') or {}).get('total_x')):>8}{fx((i.get('sub') or {}).get('rii_x')):>8}  {st}{flag}")
 
 
+# ---------------------------------------------------------------- light mode
+
+def live_issues_from_db(conn, today: date) -> list[dict]:
+    """Mainboard issues whose window is near today, shaped like the IG records
+    the writers expect (issue_id, ig_id, name, open_date, price_band_high)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT id AS issue_id, investorgain_id AS ig_id, name, open_date, close_date,
+                      price_band_high
+               FROM issues
+               WHERE board = 'mainboard' AND investorgain_id IS NOT NULL
+                 AND open_date BETWEEN %s AND %s""",
+            (today - timedelta(days=15), today + timedelta(days=10)),
+        )
+        rows = cur.fetchall()
+    for r in rows:
+        if r["price_band_high"] is not None:
+            r["price_band_high"] = float(r["price_band_high"])
+    return rows
+
+
+def light_once(conn, today: date) -> str:
+    """One cheap refresh: three pages (InvestorGain GMP report, InvestorGain
+    subscription report, IPO Watch live table) instead of one page per issue.
+    Calendar and research fields are left to the twice-daily full run."""
+    import db
+
+    known = live_issues_from_db(conn, today)
+    by_ig = {k["ig_id"]: k for k in known}
+    now = datetime.now(iw.IST)
+    notes = []
+
+    with db.RunLog(conn, "investorgain-light") as log:
+        log.ok_if_seen = True
+        try:
+            rows = ig.fetch_live_gmp()
+        except (ig.ParseError, base.FetchError) as exc:
+            rows = []
+            notes.append(f"GMP report failed: {exc}")
+        with conn.cursor() as cur:
+            for r in rows:
+                k = by_ig.get(r["ig_id"])
+                if not k or r["category"] not in ("IPO", "") or r["observed_at"] is None:
+                    continue
+                log.seen += 1
+                mode = "live" if now - r["observed_at"] <= timedelta(hours=36) else "backfill"
+                cur.execute(
+                    """INSERT INTO gmp_history (issue_id, source, observed_at, gmp_amount, gmp_pct,
+                                                est_listing_price, raw, capture_mode, observed_precision)
+                       VALUES (%s,'investorgain',%s,%s,%s,%s,%s,%s,'minute')
+                       ON CONFLICT (issue_id, source, observed_at) DO NOTHING""",
+                    (k["issue_id"], r["observed_at"], r["gmp_amount"], r["gmp_pct"],
+                     (r["price"] + r["gmp_amount"]) if r["price"] and r["gmp_amount"] is not None else None,
+                     json.dumps({**r["raw"], "via": "live-report", "fetched_at": now.isoformat()}), mode),
+                )
+                log.written += cur.rowcount
+        notes.append(f"GMP {log.written} new")
+
+    with db.RunLog(conn, "investorgain-subscription") as log:
+        log.ok_if_seen = True
+        try:
+            subs = ig.fetch_subscription()
+        except (ig.ParseError, base.FetchError) as exc:
+            subs = []
+            notes.append(f"subscription failed: {exc}")
+        write_subscription(conn, subs, log)
+        notes.append(f"subscription {log.written} new")
+
+    with db.RunLog(conn, "ipowatch-live") as log:
+        log.ok_if_seen = True
+        try:
+            iw_rows = iw.parse_live(base.get(iw.LIVE_URL), today)
+        except (iw.ParseError, base.FetchError) as exc:
+            iw_rows = []
+            notes.append(f"IPO Watch failed: {exc}")
+        write_ipowatch(conn, iw_rows, known, log)
+        notes.append(f"IPO Watch {log.written} new")
+
+    frozen = [f for f in freeze_t_minus_1(conn, today) + freeze_close_day(conn, today) if "skipped" not in f]
+    if frozen:
+        notes.append(f"{len(frozen)} snapshot(s) frozen")
+    return " · ".join(notes)
+
+
+def closing_today(conn, today: date) -> list[str]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT name FROM issues WHERE board = 'mainboard' AND close_date = %s", (today,))
+        return [r["name"] for r in cur.fetchall()]
+
+
+def run_light(loop_every: int | None, until: str | None, only_if_closing: bool) -> None:
+    import time as _time
+    import db
+
+    today = today_ist()
+    stop = None
+    if until:
+        hh, mm = (int(x) for x in until.split(":"))
+        stop = datetime.combine(today, time(hh, mm), tzinfo=iw.IST)
+    with db.connect() as conn:
+        if only_if_closing:
+            names = closing_today(conn, today)
+            if not names:
+                print("no mainboard issue closes today - nothing to do")
+                return
+            print(f"closing today: {', '.join(names)}")
+    while True:
+        with db.connect() as conn:  # fresh connection per pass: the pooler drops idle ones
+            print(f"{datetime.now(iw.IST):%H:%M} {light_once(conn, today)}", flush=True)
+        if not loop_every or (stop and datetime.now(iw.IST) + timedelta(minutes=loop_every) > stop):
+            break
+        _time.sleep(loop_every * 60)
+
+
 # ---------------------------------------------------------------- main
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="fetch and print, no database")
     ap.add_argument("--use-cache", action="store_true", help="reuse saved pages (testing only)")
+    ap.add_argument("--mode", choices=["full", "light"], default="full",
+                    help="full: every issue page (calendar, research); light: 3 pages, GMP + subscription only")
+    ap.add_argument("--loop-every", type=int, help="light mode: repeat every N minutes")
+    ap.add_argument("--until", help="light mode: stop looping at HH:MM IST")
+    ap.add_argument("--only-if-closing-today", action="store_true",
+                    help="light mode: exit at once unless a mainboard issue closes today")
     args = ap.parse_args()
+    if args.mode == "light":
+        run_light(args.loop_every, args.until, args.only_if_closing_today)
+        return
     today = today_ist()
 
     ig_issues, ig_problems = fetch_investorgain(args.use_cache)

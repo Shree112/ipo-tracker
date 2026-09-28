@@ -151,41 +151,45 @@ export async function listIssues(): Promise<IssueRow[]> {
 
 export async function getIssue(slug: string) {
   const sql = db();
-  const rows = await sql.unsafe(
-    `SELECT ${ISSUE_COLUMNS}
-     FROM issues i
-     LEFT JOIN issue_status st ON st.issue_id = i.id
-     LEFT JOIN listing_outcome lo ON lo.issue_id = i.id
-     WHERE i.slug = $1`,
-    [slug],
-  );
-  if (!rows.length) return null;
-  const issue = normalise(rows[0]);
-
-  const [gmp, subs, snaps, details] = await Promise.all([
+  // One round trip: every query keys on the slug, so none waits for another.
+  // (Before, the page made three sequential trips - and with the database in
+  // Singapore that latency was most of the load time.)
+  const bySlug = () => sql`(SELECT id FROM issues WHERE slug = ${slug})`;
+  const [rows, gmp, subs, snaps, details, bands] = await Promise.all([
+    sql.unsafe(
+      `SELECT ${ISSUE_COLUMNS}
+       FROM issues i
+       LEFT JOIN issue_status st ON st.issue_id = i.id
+       LEFT JOIN listing_outcome lo ON lo.issue_id = i.id
+       WHERE i.slug = $1`,
+      [slug],
+    ),
     sql<GmpPoint[]>`
       SELECT source, observed_at, gmp_amount, gmp_pct, capture_mode
       FROM gmp_history
-      WHERE issue_id = ${issue.id} AND gmp_pct IS NOT NULL
+      WHERE issue_id = ${bySlug()} AND gmp_pct IS NOT NULL
       ORDER BY observed_at`,
     sql<SubPoint[]>`
       SELECT observed_at, qib_x, nii_x, shni_x, bhni_x, rii_x, employee_x, total_x
-      FROM subscription WHERE issue_id = ${issue.id}
+      FROM subscription WHERE issue_id = ${bySlug()}
       ORDER BY observed_at`,
     sql<{ phase: string; gmp_pct: number | null; sub_total_x: number | null; sub_rii_x: number | null; taken_at: Date; extras: Record<string, unknown> | null }[]>`
       SELECT phase, gmp_pct, sub_total_x, sub_rii_x, taken_at, extras
-      FROM signal_snapshot WHERE issue_id = ${issue.id} ORDER BY phase DESC`,
+      FROM signal_snapshot WHERE issue_id = ${bySlug()} ORDER BY phase DESC`,
     // issue_detail arrives with a schema update; until the Python side has
     // applied it, render the page without the research sections instead of
     // failing the whole page.
     sql<IssueDetail[]>`
       SELECT anchor, anchor_summary, anchor_lockin_30, anchor_lockin_90,
              financials, peers, objects, kpis, updated_at
-      FROM issue_detail WHERE issue_id = ${issue.id}`.catch((e: { code?: string }) => {
+      FROM issue_detail WHERE issue_id = ${bySlug()}`.catch((e: { code?: string }) => {
       if (e?.code === "42P01" || e?.code === "42703") return [] as IssueDetail[];
       throw e;
     }),
+    baseRates(),
   ]);
+  if (!rows.length) return null;
+  const issue = normalise(rows[0]);
   const detail = details[0]
     ? {
         ...details[0],
@@ -199,7 +203,7 @@ export async function getIssue(slug: string) {
     snaps.find((s) => s.phase === "t_minus_1")?.gmp_pct ??
     (issue.gmp_latest?.find((g) => g.source === "investorgain") ?? issue.gmp_latest?.[0])?.gmp_pct ??
     null;
-  const history = refGmp === null ? null : await baseRate(refGmp);
+  const history = refGmp === null ? null : pickBand(bands, refGmp);
 
   return { issue, gmp: [...gmp], subs: [...subs], snaps: [...snaps], history, refGmp, detail };
 }
@@ -213,16 +217,34 @@ const BANDS: [number, number, string][] = [
   [40, 10000, "40% or more"],
 ];
 
-export async function baseRate(gmpPct: number) {
-  const band = BANDS.find(([lo, hi]) => gmpPct >= lo && gmpPct < hi) ?? BANDS[BANDS.length - 1];
-  const [r] = await db()<{ n: number; med: number | null; pos: number | null }[]>`
-    SELECT count(*)::int AS n,
+type BandStat = { label: string; lo: number; hi: number; n: number; median: number | null; positive: number | null };
+let bandCache: { at: number; rows: BandStat[] } | null = null;
+
+/** Base rates for every GMP band in one query, cached per server instance for
+ *  an hour - they only move when a new issue lists. */
+export async function baseRates(): Promise<BandStat[]> {
+  if (bandCache && Date.now() - bandCache.at < 3_600_000) return bandCache.rows;
+  const rows = await db()<{ b: number; n: number; med: number | null; pos: number | null }[]>`
+    SELECT CASE WHEN predicted_gain_pct < 0 THEN 0 WHEN predicted_gain_pct < 5 THEN 1
+                WHEN predicted_gain_pct < 10 THEN 2 WHEN predicted_gain_pct < 20 THEN 3
+                WHEN predicted_gain_pct < 40 THEN 4 ELSE 5 END AS b,
+           count(*)::int AS n,
            percentile_cont(0.5) WITHIN GROUP (ORDER BY actual_gain_pct) AS med,
            100.0 * avg((actual_gain_pct > 0)::int) AS pos
     FROM calibration
-    WHERE phase = 't_minus_1' AND price_basis = 'open'
-      AND predicted_gain_pct >= ${band[0]} AND predicted_gain_pct < ${band[1]}`;
-  return { label: band[2], n: r.n, median: r.med, positive: r.pos };
+    WHERE phase = 't_minus_1' AND price_basis = 'open' AND predicted_gain_pct IS NOT NULL
+    GROUP BY 1`;
+  const out = BANDS.map(([lo, hi, label], k) => {
+    const r = rows.find((x) => x.b === k);
+    return { label, lo, hi, n: r?.n ?? 0, median: r?.med ?? null, positive: r?.pos ?? null };
+  });
+  bandCache = { at: Date.now(), rows: out };
+  return out;
+}
+
+function pickBand(bands: BandStat[], gmpPct: number) {
+  const b = bands.find((x) => gmpPct >= x.lo && gmpPct < x.hi) ?? bands[bands.length - 1];
+  return { label: b.label, n: b.n, median: b.median, positive: b.positive };
 }
 
 export type Decision = "applied" | "skipped" | "undo";

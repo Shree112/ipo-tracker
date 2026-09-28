@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from . import base
@@ -261,6 +261,8 @@ def parse_subscription(html: str) -> list[dict[str, Any]]:
                 rec["raw"][k] = re.sub(r"<[^>]+>", "", str(v))
             elif "lastupdated" in nk or "updatedon" in nk:
                 rec["site_updated"] = str(v)
+            if nk == "total":
+                rec["observed_at"] = _site_time(v)  # "<b>0.51</b><br><small>25th Sep 18:55</small>"
         if rec.get("total_x") is None and rec.get("rii_x") is None:
             continue
         out.append(rec)
@@ -419,3 +421,68 @@ def parse_detail(html: str) -> dict[str, Any]:
         "objects": _objects(_resolve(flight, ipo.get("issue_objects"))),
         "kpis": {k: v for k, v in kpis.items() if v is not None} or None,
     }
+
+
+# ---------------------------------------------------------------- light refresh
+# The live GMP report carries every issue's current GMP and its "Updated-On"
+# time in one page, so the intraday refresh needs one request instead of one
+# per issue. Same observed_at convention as the issue page (the site's own
+# update time), so a reading seen by both paths is stored once.
+
+_RS = re.compile(r"&#8377;\s*<b>\s*(-?[\d.,]+|--)\s*</b>|₹\s*<b>\s*(-?[\d.,]+|--)\s*</b>")
+
+
+def _site_time(text: Any, now: datetime | None = None) -> datetime | None:
+    """'27-Sep 8:33' or '25th Sep 18:55' (IST, no year) -> aware datetime."""
+    from .ipowatch import IST, month_no
+    if not text:
+        return None
+    t = re.sub(r"<[^>]+>", " ", str(text))
+    m = re.search(r"(\d{1,2})(?:st|nd|rd|th)?[-\s]+([A-Za-z]{3,9})\s+(\d{1,2}):(\d{2})", t)
+    if not m:
+        return None
+    mon = month_no(m.group(2))
+    if not mon:
+        return None
+    now = now or datetime.now(IST)
+    for year in (now.year, now.year - 1):
+        try:
+            dt = datetime(year, mon, int(m.group(1)), int(m.group(3)), int(m.group(4)), tzinfo=IST)
+        except ValueError:
+            continue
+        if dt <= now + timedelta(days=2):
+            return dt
+    return None
+
+
+def parse_live_gmp(html: str) -> list[dict[str, Any]]:
+    rows = _array(flight_payload(html), "reportTableData")
+    if rows is None:
+        raise ParseError("reportTableData missing from the live GMP report")
+    out = []
+    for r in rows:
+        ig_id = r.get("~id")
+        if not ig_id:
+            m = _ISSUE_PATH.search(json.dumps(r, ensure_ascii=False))
+            ig_id = int(m.group(2)) if m else None
+        if not ig_id:
+            continue
+        g = _RS.search(str(r.get("GMP") or ""))
+        raw_amt = (g.group(1) or g.group(2)) if g else None
+        amount = None if raw_amt in (None, "--") else _num(raw_amt)
+        out.append({
+            "ig_id": int(ig_id),
+            "category": str(r.get("~IPO_Category") or "").strip().upper(),
+            "gmp_amount": amount,
+            "gmp_pct": _num(r.get("~gmp_percent_calc")) if amount is not None else None,
+            "observed_at": _site_time(r.get("Updated-On")),
+            "price": _num(r.get("Price (₹)") or r.get("Price")),
+            "close_date": _iso_date(r.get("~Srt_Close")),
+            "raw": {"GMP": re.sub(r"<[^>]+>", " ", str(r.get("GMP") or "")).strip(),
+                    "Updated-On": re.sub(r"<[^>]+>", "", str(r.get("Updated-On") or ""))},
+        })
+    return out
+
+
+def fetch_live_gmp(*, use_cache: bool = False) -> list[dict[str, Any]]:
+    return parse_live_gmp(get_page(LIVE_URL, use_cache=use_cache))

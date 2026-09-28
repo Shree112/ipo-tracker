@@ -88,6 +88,9 @@ class RunLog:
     def __exit__(self, exc_type, exc, tb) -> bool:
         if exc_type is not None:
             status, message = "error", f"{exc_type.__name__}: {exc}"[:2000]
+        elif self.written == 0 and getattr(self, "ok_if_seen", False) and self.seen > 0:
+            # frequent refreshes often find nothing new - that's not a failure
+            status, message = "ok", "no changes since last run"
         elif self.written == 0:
             status, message = "empty", "scraper completed but wrote nothing"
         else:

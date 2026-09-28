@@ -270,3 +270,24 @@ pooler**, port 6543) and `SITE_PASSWORD` -> Deploy. Every later `git push`
 redeploys by itself. Then put the Vercel address in the `SITE_URL` Actions
 secret so digest cards link to the page.
 
+---
+
+## Refresh schedule
+
+| When | What | Workflow |
+|---|---|---|
+| 07:35 IST | full run (every issue page: calendar, anchor book, financials) + digest | `live.yml` |
+| 19:15 IST | full run | `live.yml` |
+| every hour | light run: GMP + subscription from 3 pages | `refresh.yml` |
+| every 5 min, 09:10-17:25 IST, weekdays | light run, **only on days a mainboard issue closes** | `refresh.yml` |
+
+```bat
+python scripts\run_live.py --mode light                                   :: one light pass
+python scripts\run_live.py --mode light --only-if-closing-today --loop-every 5 --until 17:25
+```
+
+Light runs key GMP readings on the site's own update time and subscription on
+the report's own timestamp, so repeating them never duplicates data. The repo
+is public, so Actions minutes are free; GitHub pauses scheduled workflows on a
+repo with no commits for 60 days - any push re-enables them.
+
