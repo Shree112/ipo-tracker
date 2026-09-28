@@ -24,6 +24,8 @@ import { Fold, LockedFold } from "@/components/Fold";
 import AlertsPitch from "@/components/AlertsPitch";
 import OpenOnHash from "@/components/OpenOnHash";
 import Chatter from "@/components/Chatter";
+import AllotmentCard from "@/components/AllotmentCard";
+import { BSE_STATUS, registrarLink } from "@/lib/registrars";
 
 export const dynamic = "force-dynamic";
 
@@ -121,6 +123,7 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
     ["Anchor book", i.anchor_date],
     ["Opens", i.open_date],
     ["Closes", i.close_date],
+    ["Allotment", i.allotment_date],
     ["Lists", i.listing_date],
   ];
   const shortName = i.name.replace(/ (Ltd|Limited)\.?$/i, "");
@@ -148,7 +151,7 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
               <div className="badges">
                 <StageBadge stage={stage} />
                 {digest ? <RadarBadge kept={sticky} reasons={match.reasons} /> : null}
-                <StatusBadge status={i.status} />
+                <StatusBadge status={i.status} allotment={i.allotment} />
               </div>
             </div>
           </div>
@@ -233,6 +236,25 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
               Alert settings
             </Link>
           </div>
+        ) : null}
+
+        {member && i.status === "applied" && (i.allotment_date || i.registrar) ? (
+          (() => {
+            const reg = registrarLink(i.registrar);
+            return (
+              <AllotmentCard
+                slug={i.slug}
+                result={i.allotment}
+                allotmentDate={i.allotment_date}
+                allotmentLabel={i.allotment_date ? fmtDate(i.allotment_date, true) : "a date not announced yet"}
+                registrar={i.registrar}
+                registrarLabel={reg.label}
+                registrarUrl={reg.url}
+                bseUrl={reg.known ? BSE_STATUS : null}
+                out={!!i.allotment_date && i.allotment_date <= today}
+              />
+            );
+          })()
         ) : null}
 
         <div className="card section">

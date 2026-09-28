@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { verifyToken } from "@/lib/links";
 import { db } from "@/lib/db";
-import { setDecision } from "@/lib/queries";
+import { setAllotment, setDecision } from "@/lib/queries";
 import type { LinkPayload } from "@/lib/links";
 
 /** Whose decision this is: the account in the link, or the admin for old links. */
@@ -24,7 +24,8 @@ async function confirm(formData: FormData) {
   const note = String(formData.get("note") || "").trim().slice(0, 200) || null;
   const uid = await ownerOf(v.payload);
   if (!uid) redirect(`/act/${encodeURIComponent(token)}`);
-  await setDecision(uid, v.payload.s, v.payload.d, note);
+  if (v.payload.d === "allotted" || v.payload.d === "not_allotted") await setAllotment(uid, v.payload.s, v.payload.d);
+  else await setDecision(uid, v.payload.s, v.payload.d, note);
   redirect(`/act/${encodeURIComponent(token)}?done=1`);
 }
 
@@ -82,12 +83,52 @@ export default async function ActPage({
       </>,
     );
   }
-  const [issue] = await db()<{ name: string; status: string | null }[]>`
-    SELECT i.name, st.status FROM issues i
+  const [issue] = await db()<{ name: string; status: string | null; allotment: string | null }[]>`
+    SELECT i.name, st.status, st.allotment FROM issues i
     LEFT JOIN user_issue_status st ON st.issue_id = i.id AND st.user_id = ${uid}::uuid
     WHERE i.slug = ${slug}`;
   if (!issue) return shell(<h1 style={{ fontSize: 22 }}>Issue not found</h1>);
   const name = issue.name.replace(/ (Ltd|Limited)\.?$/i, "");
+
+  const isAllot = decision === "allotted" || decision === "not_allotted";
+  if (isAllot) {
+    // one tap is enough here: it's a record, not something that changes emails
+    if (done || issue.allotment === decision) {
+      return shell(
+        <>
+          <div className="badges">
+            <span className={`badge ${decision === "allotted" ? "green" : ""}`}>
+              {decision === "allotted" ? "✓ Allotted" : "Not allotted"}
+            </span>
+          </div>
+          <h1 style={{ fontSize: 28 }}>{name}</h1>
+          <p className="muted">
+            {decision === "allotted"
+              ? "Nice. You'll get a listing-day note before the market opens."
+              : "Noted. No listing-day email for this one. Better luck with the next."}
+          </p>
+          <Link className="btn" href={`/issue/${slug}`}>
+            Open the issue page
+          </Link>
+        </>,
+      );
+    }
+    return shell(
+      <form action={confirm} style={{ display: "grid", gap: 14 }}>
+        <input type="hidden" name="token" value={token} />
+        <div>
+          <p className="muted small">Allotment result</p>
+          <h1 style={{ fontSize: 28, marginTop: 4 }}>
+            {decision === "allotted" ? `You got shares in ${name}?` : `No allotment in ${name}?`}
+          </h1>
+        </div>
+        <button className="btn primary" type="submit">
+          {decision === "allotted" ? "Yes, I got shares" : "Yes, not allotted"}
+        </button>
+        <p className="xs muted">You can change it on the issue page.</p>
+      </form>,
+    );
+  }
 
   if (done || issue.status === decision) {
     return shell(

@@ -113,6 +113,7 @@ def write_investorgain(conn, issues: list[dict], log) -> dict[int, int]:
             issue_type=rec["issue_type"] or None, exchanges=rec["exchanges"],
             chittorgarh_id=rec["cor_id"], investorgain_id=rec["ig_id"], investorgain_url=rec["url"],
             open_date=rec["open_date"], close_date=rec["close_date"], anchor_date=rec["anchor_date"],
+            allotment_date=rec.get("allotment_date"), registrar=rec.get("registrar"),
             listing_date=rec["listing_date"], price_band_low=rec["price_band_low"],
             price_band_high=rec["price_band_high"], lot_size=rec["lot_size"],
             min_order_amount=rec["min_order_amount"], issue_size_cr=rec["issue_size_cr"],

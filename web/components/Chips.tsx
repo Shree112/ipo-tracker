@@ -6,7 +6,9 @@ export function StageBadge({ stage }: { stage: Stage }) {
   return <span className={`badge ${tone}`}>{stage.label}</span>;
 }
 
-export function StatusBadge({ status }: { status: string }) {
+export function StatusBadge({ status, allotment }: { status: string; allotment?: string | null }) {
+  if (status === "applied" && allotment === "allotted") return <span className="badge green">✓ Allotted</span>;
+  if (status === "applied" && allotment === "not_allotted") return <span className="badge">Applied · not allotted</span>;
   if (status === "applied") return <span className="badge green">✓ Applied</span>;
   if (status === "skipped") return <span className="badge">Skipped</span>;
   return null;

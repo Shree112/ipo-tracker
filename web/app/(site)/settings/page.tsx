@@ -66,6 +66,7 @@ async function save(fd: FormData) {
       digest_days = EXCLUDED.digest_days, start_at = EXCLUDED.start_at,
       last_day_reminder = EXCLUDED.last_day_reminder, email_to = EXCLUDED.email_to,
       paused = EXCLUDED.paused, updated_at = now()`;
+  await db()`UPDATE alert_rules SET onboarded_at = COALESCE(onboarded_at, now()) WHERE user_id = ${v.id}::uuid`.catch(() => undefined);
   revalidatePath("/settings");
   redirect("/settings?saved=1");
 }

@@ -28,7 +28,7 @@ export async function middleware(req: NextRequest) {
   const onSignin = path === "/signin";
   // readable without an account: the live list and the issue pages (with the
   // research sections locked). Everything else needs a signed-in user.
-  const isPublic = path === "/" || path.startsWith("/issue/");
+  const isPublic = path === "/" || path.startsWith("/issue/") || path === "/track-record";
 
   const setCookies: { name: string; value: string; options: object }[] = [];
   const setHeaders: Record<string, string> = {};

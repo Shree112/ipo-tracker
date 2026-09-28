@@ -91,6 +91,9 @@ export type IssueRow = {
   ipowatch_url: string | null;
   status: string;
   note: string | null;
+  allotment: "allotted" | "not_allotted" | null;
+  registrar: string | null;
+  allotment_date: string | null;
   gmp_latest: { source: string; gmp_pct: number; gmp_amount: number; observed_at: string }[] | null;
   sub_latest: (Omit<SubPoint, "observed_at"> & { observed_at: string }) | null;
   peak_since_t1: number | null;
@@ -105,7 +108,7 @@ const ISSUE_COLUMNS = `
   i.price_band_low, i.price_band_high, i.lot_size, i.min_order_amount,
   i.issue_size_cr, i.fresh_issue_cr, i.ofs_cr, i.pe_ratio, i.exchanges,
   i.rhp_url, i.anchor_report_url, i.investorgain_url, i.ipowatch_url,
-  COALESCE(st.status, '-') AS status, st.note,
+  COALESCE(st.status, '-') AS status, st.note, st.allotment, i.registrar, i.allotment_date,
   (SELECT json_agg(x) FROM (
      SELECT DISTINCT ON (source) source, gmp_pct, gmp_amount, observed_at
      FROM gmp_history g WHERE g.issue_id = i.id AND g.gmp_pct IS NOT NULL
@@ -134,6 +137,7 @@ function normalise(r: Record<string, unknown>): IssueRow {
     close_date: toISODate(r.close_date as Date),
     anchor_date: toISODate(r.anchor_date as Date),
     listing_date: toISODate(r.listing_date as Date),
+    allotment_date: toISODate(r.allotment_date as Date),
   };
 }
 
@@ -288,6 +292,18 @@ export async function setDecision(userId: string, slug: string, decision: Decisi
           note = COALESCE(EXCLUDED.note, user_issue_status.note)`;
 }
 
+export type Allotment = "allotted" | "not_allotted" | "unknown";
+
+/** Record a member's allotment result (only for issues they marked Applied). */
+export async function setAllotment(userId: string, slug: string, result: Allotment) {
+  const sql = db();
+  const value = result === "unknown" ? null : result;
+  await sql`
+    UPDATE user_issue_status st SET allotment = ${value}, allotment_at = ${value ? sql`now()` : null}, updated_at = now()
+    FROM issues i
+    WHERE i.id = st.issue_id AND i.slug = ${slug} AND st.user_id = ${userId}::uuid AND st.status = 'applied'`;
+}
+
 export type Match = { reasons: string[]; sticky: boolean; slug?: string; name?: string };
 
 /** The viewer's radar: which issues match their alert rules today. Comes from
@@ -319,6 +335,7 @@ export type Rules = {
   last_day_reminder: boolean;
   email_to: string | null;
   paused: boolean;
+  onboarded_at?: Date | null;
 };
 
 export const RULE_KEYS = [
@@ -336,8 +353,16 @@ export async function rulesFor(userId: string): Promise<Rules | null> {
   const [r] = await db()<Rules[]>`
     SELECT gmp_pct_min, profit_per_lot_min, sub_total_min, sub_retail_min, sub_qib_min, anchor_mf_min,
            size_min_cr, size_max_cr, match_mode, digest_hour, digest_days, start_at, last_day_reminder,
-           email_to, paused
-    FROM alert_rules WHERE user_id = ${userId}::uuid`;
+           email_to, paused, onboarded_at
+    FROM alert_rules WHERE user_id = ${userId}::uuid`.catch((e: { code?: string }) => {
+    // onboarded_at arrives with a schema update; until then, treat everyone as onboarded
+    if (e?.code === "42703") return db()<Rules[]>`
+      SELECT gmp_pct_min, profit_per_lot_min, sub_total_min, sub_retail_min, sub_qib_min, anchor_mf_min,
+             size_min_cr, size_max_cr, match_mode, digest_hour, digest_days, start_at, last_day_reminder,
+             email_to, paused, now() AS onboarded_at
+      FROM alert_rules WHERE user_id = ${userId}::uuid`;
+    throw e;
+  });
   return r ?? null;
 }
 
@@ -352,9 +377,13 @@ export function describeRules(r: Rules | null): string {
     r.sub_retail_min !== null ? `retail ≥ ${n(r.sub_retail_min)}x` : null,
     r.sub_qib_min !== null ? `QIB ≥ ${n(r.sub_qib_min)}x` : null,
     r.anchor_mf_min !== null ? `MFs ≥ ${n(r.anchor_mf_min)}% of anchor` : null,
-    r.size_min_cr !== null || r.size_max_cr !== null
-      ? `size ${r.size_min_cr !== null ? `₹${n(r.size_min_cr)}` : "any"}–${r.size_max_cr !== null ? `₹${n(r.size_max_cr)}` : "any"} Cr`
-      : null,
+    r.size_min_cr != null && r.size_max_cr != null
+      ? `size ₹${n(r.size_min_cr)}–${n(r.size_max_cr)} Cr`
+      : r.size_min_cr != null
+        ? `size ≥ ₹${n(r.size_min_cr)} Cr`
+        : r.size_max_cr != null
+          ? `size ≤ ₹${n(r.size_max_cr)} Cr`
+          : null,
   ].filter(Boolean);
   if (!parts.length) return "no alerts set";
   return parts.join(r.match_mode === "any" ? " or " : " and ");

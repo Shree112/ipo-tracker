@@ -147,6 +147,9 @@ def parse_issue(html: str) -> dict[str, Any]:
         "open_date": _iso_date(ipo.get("issue_open_date")),
         "close_date": close,
         "anchor_date": _iso_date(ipo.get("timetable_anchor_bid_dt")),
+        "allotment_date": _iso_date(ipo.get("timetable_boa_dt")),
+        "registrar": ((ipo.get("registrar_name")
+                       or ((_array(flight, "registrarInfo") or [{}])[0] or {}).get("registrar_name") or "").strip() or None),
         "listing_date": _loose_date(ipo.get("timetable_listing_dt")),
         "price_band_low": _num(ipo.get("issue_price_lower")),
         "price_band_high": upper,

@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import db  # noqa: E402
 import send_digest as sd  # noqa: E402
+import after_apply  # noqa: E402
 from sources.ipowatch import IST  # noqa: E402
 
 REMINDER_HOUR = 13
@@ -195,6 +196,10 @@ def main() -> None:
             return
         if not args.user:
             account_emails(conn, args.dry_run)
+            # after Applied + "Got shares": listing-day mail goes before the 8am digests.
+            # (No allotment-day email: registrars publish at unpredictable times, so
+            # members check from the issue page instead.)
+            after_apply.listing_emails(conn, today, target_hour, send_email, args.dry_run)
         users = due_users(conn, target_hour, today, args.user)
         if not users:
             print(f"{today} {target_hour:02d}h: no digests due")

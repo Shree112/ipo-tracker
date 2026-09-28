@@ -16,6 +16,7 @@ export type HomeRow = {
   kept: boolean;
   reasons: string[];
   status: string;
+  allotment: string | null;
   gmp: string;
   gmpSub: string;
   gmpTone: "" | "warn";
@@ -50,7 +51,7 @@ function Row({ r }: { r: HomeRow }) {
           <div className="co-meta">
             <StageBadge stage={r.stage} />
             {r.radar ? <RadarBadge kept={r.kept} reasons={r.reasons} /> : null}
-            <StatusBadge status={r.status} />
+            <StatusBadge status={r.status} allotment={r.allotment} />
           </div>
         </div>
       </div>

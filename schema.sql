@@ -522,6 +522,23 @@ CREATE TABLE IF NOT EXISTS issue_chatter_summary (
   model          text
 );
 
+-- After applying: allotment and listing.
+-- issues: which registrar runs the allotment, and when the basis of allotment
+-- is finalised (both from the issue page).
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS registrar text;
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS allotment_date date;
+-- each member's own result, and which reminder emails already went out
+ALTER TABLE user_issue_status ADD COLUMN IF NOT EXISTS allotment text
+  CHECK (allotment IN ('allotted', 'not_allotted'));
+ALTER TABLE user_issue_status ADD COLUMN IF NOT EXISTS allotment_at timestamptz;
+ALTER TABLE user_issue_status ADD COLUMN IF NOT EXISTS allotment_mailed_at timestamptz;
+ALTER TABLE user_issue_status ADD COLUMN IF NOT EXISTS listing_mailed_at timestamptz;
+ALTER TABLE user_digest_run DROP CONSTRAINT IF EXISTS user_digest_run_kind_check;
+ALTER TABLE user_digest_run ADD CONSTRAINT user_digest_run_kind_check
+  CHECK (kind IN ('daily', 'reminder', 'allotment', 'listing'));
+-- first sign-in: null until the member picks a starting set of rules
+ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS onboarded_at timestamptz;
+
 -- Lock the database away from Supabase's public API. Signing in with Google
 -- means the project's anon key sits with the website, and that key can call
 -- the auto-generated REST API for anything in the public schema that RLS

@@ -14,22 +14,19 @@ export default function TopBar({ viewer }: { viewer?: Viewer | null }) {
           <span className="logo-mark" aria-hidden>IC</span>
           <span>IPO Copilot</span>
         </Link>
-        {approved ? (
-          <nav className="site-nav">
-            <NavLink href="/" exact>
-              Live IPOs
+        <nav className="site-nav">
+          <NavLink href="/" exact>
+            Live IPOs
+          </NavLink>
+          <NavLink href="/track-record">Track record</NavLink>
+          {approved ? <NavLink href="/settings">Alerts</NavLink> : null}
+          {approved && viewer?.isAdmin ? (
+            <NavLink href="/admin">
+              Members
+              {viewer.pending ? <span className="nav-count">{viewer.pending}</span> : null}
             </NavLink>
-            <NavLink href="/settings">Alerts</NavLink>
-            {viewer?.isAdmin ? (
-              <NavLink href="/admin">
-                Members
-                {viewer.pending ? <span className="nav-count">{viewer.pending}</span> : null}
-              </NavLink>
-            ) : null}
-          </nav>
-        ) : (
-          <span className="grow" />
-        )}
+          ) : null}
+        </nav>
         <span className="header-date">{fmtDate(todayIST(), true)} · IST</span>
         <ThemeToggle />
         {viewer ? (

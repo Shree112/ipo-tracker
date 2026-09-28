@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import HomeList, { type HomeRow } from "@/components/HomeList";
 import { addDays, crore, fmtDate, fmtWhen, pct, sizeSplit, stageOf, times, todayIST } from "@/lib/format";
 import { describeRules, listIssues, matchesFor, rulesFor, type IssueRow, type Match } from "@/lib/queries";
@@ -31,6 +32,7 @@ function toRow(i: IssueRow, today: string, m: Match | undefined): HomeRow {
     kept,
     reasons: m?.reasons ?? [],
     status: i.status,
+    allotment: i.allotment,
     gmp: g ? pct(g.gmp_pct) : "–",
     gmpSub: other ? `${SRC[other.source]} ${pct(other.gmp_pct)}` : g ? fmtWhen(g.observed_at, today) : "no quote",
     gmpTone: kept ? "warn" : "",
@@ -47,7 +49,8 @@ function toRow(i: IssueRow, today: string, m: Match | undefined): HomeRow {
   };
 }
 
-export default async function Home() {
+export default async function Home({ searchParams }: { searchParams: Promise<{ welcome?: string }> }) {
+  const { welcome } = await searchParams;
   const today = todayIST();
   // the verified id comes from the middleware, so the data queries start
   // alongside the account check instead of after it
@@ -60,6 +63,8 @@ export default async function Home() {
   ]);
   // The list is public; the radar, alerts and Applied/Skip are for approved members.
   const member = viewer?.status === "approved";
+  // first sign-in after approval: pick a starting set of alerts
+  if (member && rules && !rules.onboarded_at) redirect("/welcome");
   const matches = member ? allMatches : new Map<number, Match>();
   const rows = issues.map((i) => toRow(i, today, matches.get(i.id)));
   const radar = rows.filter((r) => r.radar).length;
@@ -115,6 +120,13 @@ export default async function Home() {
           </div>
         </div>
         <Ticker items={ticker} />
+        {member && welcome ? (
+          <div className="saved-line" style={{ marginBottom: 16 }}>
+            You&apos;re set: {ruleText}. Your digest arrives around{" "}
+            {rules ? `${((rules.digest_hour + 11) % 12) + 1}:00 ${rules.digest_hour < 12 ? "am" : "pm"}` : "8:00 am"} on
+            days something matches. <Link href="/settings" className="link">Fine-tune</Link>
+          </div>
+        ) : null}
         {!viewer ? (
           <AlertsPitch example={example} />
         ) : !member ? (
