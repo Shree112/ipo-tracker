@@ -1,9 +1,10 @@
 import Link from "next/link";
 import HomeList, { type HomeRow } from "@/components/HomeList";
-import { crore, fmtDate, fmtWhen, pct, sizeSplit, stageOf, times, todayIST } from "@/lib/format";
+import { addDays, crore, fmtDate, fmtWhen, pct, sizeSplit, stageOf, times, todayIST } from "@/lib/format";
 import { describeRules, listIssues, matchesFor, rulesFor, type IssueRow, type Match } from "@/lib/queries";
 import { getViewer, viewerId } from "@/lib/viewer";
 import AlertsPitch from "@/components/AlertsPitch";
+import Ticker from "@/components/Ticker";
 
 export const dynamic = "force-dynamic";
 
@@ -79,12 +80,26 @@ export default async function Home() {
       }
     : null;
 
+  // live GMPs for the ticker: everything open or about to open, biggest first
+  const ticker = issues
+    .filter((i) => i.close_date && i.close_date >= today && i.open_date && i.open_date <= addDays(today, 3))
+    .map((i) => ({ i, g: (i.gmp_latest ?? []).find((x) => x.source === "investorgain") ?? i.gmp_latest?.[0] }))
+    .filter((x) => x.g)
+    .sort((a, b) => b.g!.gmp_pct - a.g!.gmp_pct)
+    .map(({ i, g }) => ({
+      name: i.name.replace(/ (Ltd|Limited)\.?$/i, "").replace(/\s*\(India\)/i, ""),
+      value: `${g!.gmp_pct > 0 ? "+" : ""}${pct(g!.gmp_pct)}`,
+      tone: (g!.gmp_pct > 0 ? "up" : g!.gmp_pct < 0 ? "down" : "") as "up" | "down" | "",
+    }));
+
   return (
     <>
       <main className="wrap">
         <div className="page-head">
           <div>
-            <h1>Live IPOs</h1>
+            <h1>
+              Live <em>IPOs</em>
+            </h1>
             {member ? (
               <p>
                 Mainboard issues, open and upcoming.{" "}
@@ -99,6 +114,7 @@ export default async function Home() {
             )}
           </div>
         </div>
+        <Ticker items={ticker} />
         {!viewer ? (
           <AlertsPitch example={example} />
         ) : !member ? (

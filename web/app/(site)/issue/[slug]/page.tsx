@@ -23,6 +23,7 @@ import { getViewer, viewerId } from "@/lib/viewer";
 import { Fold, LockedFold } from "@/components/Fold";
 import AlertsPitch from "@/components/AlertsPitch";
 import OpenOnHash from "@/components/OpenOnHash";
+import Chatter from "@/components/Chatter";
 
 export const dynamic = "force-dynamic";
 
@@ -81,7 +82,7 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
   const matches = member ? allMatches : new Map<number, { reasons: string[]; sticky: boolean }>();
   const rules = member ? allRules : null;
   const here = `/issue/${slug}`;
-  const { issue: i, gmp, subs, snaps, history, refGmp, detail } = data;
+  const { issue: i, gmp, subs, snaps, history, refGmp, detail, chatter } = data;
   const stage = stageOf(i.open_date, i.close_date, i.listing_date, today);
   const match = matches.get(i.id);
   const digest = match !== undefined;
@@ -250,6 +251,7 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
           <OpenOnHash />
           <a href="#gmp">GMP</a>
           <a href="#subscription">Subscription</a>
+          <a href="#chatter">Chatter</a>
           <a href="#anchor">Anchor book</a>
           {!member || detail?.financials || detail?.kpis ? <a href="#financials">Financials</a> : null}
           {!member || detail?.peers?.rows?.length ? <a href="#peers">Peers</a> : null}
@@ -354,6 +356,7 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
 
         {member ? (
           <>
+            <Chatter data={chatter} today={today} />
             <AnchorBook detail={detail} issueSizeCr={i.issue_size_cr} />
             <Financials detail={detail} />
             <Peers detail={detail} companyName={i.name} />
@@ -389,6 +392,7 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
           </>
         ) : (
           <>
+            <LockedFold id="chatter" title="What investors are saying" blurb="An AI summary of what people on Reddit and IPO Watch are saying about this IPO." next={here} />
             <LockedFold id="anchor" title="Anchor book" blurb="Who bought in the anchor round, how much, and how much went to mutual funds." next={here} />
             <LockedFold id="financials" title="Financials & valuation" blurb="Income, profit, ROE, debt and valuation from the offer document." next={here} />
             <LockedFold id="peers" title="Listed peers" blurb="The listed companies it compares itself with, side by side." next={here} />

@@ -44,7 +44,9 @@ export default function AlertsPitch({
         <span className="badge green">
           <span className="dot" aria-hidden /> Free · invite-only
         </span>
-        <h2 className="pitch-title">Stop checking GMP every morning.</h2>
+        <h2 className="pitch-title">
+          Stop checking GMP <em>every morning.</em>
+        </h2>
         <p className="pitch-sub">
           Tell IPO Copilot what makes an IPO worth applying for. It watches every mainboard issue and emails you only when
           one qualifies.

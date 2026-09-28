@@ -195,6 +195,8 @@ export default function GmpChart({ series, windowStart, windowEnd, threshold }: 
             s.points.length ? (
               <g key={s.key}>
                 <polyline
+                  className="draw"
+                  pathLength={1}
                   fill="none"
                   stroke={`var(${s.colorVar})`}
                   strokeWidth={2}

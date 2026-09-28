@@ -500,6 +500,28 @@ LANGUAGE sql STABLE AS $$
          OR (m.match_mode = 'any' AND true = ANY(m.oks)));
 $$;
 
+-- What people are saying about an issue: raw comments per source (kept so a
+-- summary can be redone without re-fetching), and one summary per issue.
+CREATE TABLE IF NOT EXISTS issue_chatter (
+  issue_id     bigint NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  source       text NOT NULL CHECK (source IN ('ipowatch', 'reddit')),
+  fetched_at   timestamptz NOT NULL DEFAULT now(),
+  n_comments   int NOT NULL DEFAULT 0,
+  threads      jsonb,          -- [{title, url, n}] for Reddit; the page for IPO Watch
+  comments     jsonb,          -- [{id, text, at, score}] newest first, capped
+  status       text NOT NULL DEFAULT 'ok',   -- ok | not_configured | blocked | error
+  PRIMARY KEY (issue_id, source)
+);
+
+CREATE TABLE IF NOT EXISTS issue_chatter_summary (
+  issue_id       bigint PRIMARY KEY REFERENCES issues(id) ON DELETE CASCADE,
+  summarized_at  timestamptz NOT NULL DEFAULT now(),
+  input_hash     text NOT NULL,
+  n_comments     int NOT NULL,
+  summary        jsonb,        -- {headline, mood, points[], concerns[]}; null = too little to go on
+  model          text
+);
+
 -- Lock the database away from Supabase's public API. Signing in with Google
 -- means the project's anon key sits with the website, and that key can call
 -- the auto-generated REST API for anything in the public schema that RLS

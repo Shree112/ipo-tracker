@@ -2,6 +2,7 @@ import Link from "next/link";
 import { fmtDate, todayIST } from "@/lib/format";
 import type { Viewer } from "@/lib/viewer";
 import { NavLink, SignInLink } from "./NavLink";
+import ThemeToggle from "./ThemeToggle";
 
 export default function TopBar({ viewer }: { viewer?: Viewer | null }) {
   const approved = viewer?.status === "approved";
@@ -30,6 +31,7 @@ export default function TopBar({ viewer }: { viewer?: Viewer | null }) {
           <span className="grow" />
         )}
         <span className="header-date">{fmtDate(todayIST(), true)} · IST</span>
+        <ThemeToggle />
         {viewer ? (
           <details className="menu">
             <summary aria-label="Account">

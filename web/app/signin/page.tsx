@@ -46,7 +46,9 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<{
           <span className="logo-mark" aria-hidden>IC</span>
           <span>IPO Copilot</span>
         </div>
-        <h1 className="landing-title">Stop checking GMP every morning.</h1>
+        <h1 className="landing-title">
+          Stop checking GMP <em>every morning.</em>
+        </h1>
         <p className="landing-sub">
           Tell IPO Copilot what makes a mainboard IPO worth applying for. It watches every issue and emails you only when
           one qualifies.

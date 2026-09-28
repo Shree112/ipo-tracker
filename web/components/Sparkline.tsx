@@ -10,7 +10,7 @@ export default function Sparkline({ values, width = 72, height = 24 }: { values:
   const last = values[values.length - 1];
   return (
     <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden style={{ flex: "none" }}>
-      <polyline points={pts} fill="none" stroke="var(--series-1)" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+      <polyline className="draw" pathLength={1} points={pts} fill="none" stroke="var(--series-1)" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
       <circle cx={x(values.length - 1)} cy={y(last)} r={2.5} fill="var(--series-1)" />
     </svg>
   );

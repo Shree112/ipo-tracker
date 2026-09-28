@@ -1,0 +1,73 @@
+# Comment summaries: gathers what people say about live IPOs (IPO Watch, and
+# Reddit once an approved API app is set up) and summarises it with a free,
+# open-weights model (Qwen3 4B, Apache-2.0) run on this runner by Ollama -
+# no API key and no bill. The model only starts when some issue has new
+# comments to summarise.
+#
+# Optional repository secrets:
+#   REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USERNAME   the approved Reddit app
+#   LLM_PROVIDER, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL          use a hosted open model instead
+name: chatter
+
+on:
+  schedule:
+    - cron: "20 1 * * *"    # 06:50 IST, ahead of the morning digests
+    - cron: "10 13 * * *"   # 18:40 IST
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Re-summarise every live issue even if nothing changed"
+        type: boolean
+        default: false
+
+concurrency:
+  group: chatter
+  cancel-in-progress: false
+
+jobs:
+  chatter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      USER_AGENT: ipo-tracker/0.1 (personal research project)
+      REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+      REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+      REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
+      LLM_PROVIDER: ${{ secrets.LLM_PROVIDER || 'ollama' }}
+      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL || 'http://127.0.0.1:11434' }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL || 'qwen3:4b' }}
+      OLLAMA_MODELS: /home/runner/ollama-models
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python scripts/apply_schema.py
+
+      - name: Gather comments
+        id: fetch
+        run: python scripts/run_chatter.py --fetch ${{ inputs.force && '--force' || '' }}
+
+      - name: Restore the model
+        if: steps.fetch.outputs.needs_llm == 'true' && env.LLM_PROVIDER == 'ollama'
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/ollama-models
+          key: ollama-${{ env.LLM_MODEL }}
+
+      - name: Start Ollama
+        if: steps.fetch.outputs.needs_llm == 'true' && env.LLM_PROVIDER == 'ollama'
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          sudo systemctl stop ollama || true
+          nohup ollama serve > ollama.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:11434/api/version && break; sleep 1; done
+          ollama pull "$LLM_MODEL"
+
+      - name: Summarise
+        if: steps.fetch.outputs.needs_llm == 'true'
+        run: python scripts/run_chatter.py --summarise ${{ inputs.force && '--force' || '' }}

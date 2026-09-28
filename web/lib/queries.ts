@@ -61,6 +61,13 @@ export type IssueDetail = {
   updated_at: Date;
 };
 
+export type Chatter = {
+  summary: { headline: string; mood: "positive" | "mixed" | "negative" | "unclear"; points: string[]; concerns: string[] } | null;
+  n_comments: number | null;
+  summarized_at: Date | null;
+  sources: { source: "ipowatch" | "reddit"; status: string; n: number; threads: { title: string; url: string; n: number; sub?: string }[] | null; fetched_at: string }[] | null;
+};
+
 export type IssueRow = {
   id: number;
   slug: string;
@@ -154,7 +161,7 @@ export async function getIssue(slug: string, userId: string) {
   // (Before, the page made three sequential trips - and with the database in
   // Singapore that latency was most of the load time.)
   const bySlug = () => sql`(SELECT id FROM issues WHERE slug = ${slug})`;
-  const [rows, gmp, subs, snaps, details, bands] = await Promise.all([
+  const [rows, gmp, subs, snaps, details, bands, chatterRows] = await Promise.all([
     sql.unsafe(
       `SELECT ${ISSUE_COLUMNS}
        FROM issues i
@@ -186,6 +193,17 @@ export async function getIssue(slug: string, userId: string) {
       throw e;
     }),
     baseRates(),
+    // comment summaries arrive with a schema update too; same fallback
+    sql<Chatter[]>`
+      SELECT s.summary, s.n_comments, s.summarized_at,
+             (SELECT json_agg(json_build_object('source', c.source, 'status', c.status, 'n', c.n_comments,
+                                                'threads', c.threads, 'fetched_at', c.fetched_at) ORDER BY c.source)
+              FROM issue_chatter c WHERE c.issue_id = i.id) AS sources
+      FROM issues i LEFT JOIN issue_chatter_summary s ON s.issue_id = i.id
+      WHERE i.slug = ${slug}`.catch((e: { code?: string }) => {
+      if (e?.code === "42P01" || e?.code === "42703") return [] as Chatter[];
+      throw e;
+    }),
   ]);
   if (!rows.length) return null;
   const issue = normalise(rows[0]);
@@ -204,7 +222,8 @@ export async function getIssue(slug: string, userId: string) {
     null;
   const history = refGmp === null ? null : pickBand(bands, refGmp);
 
-  return { issue, gmp: [...gmp], subs: [...subs], snaps: [...snaps], history, refGmp, detail };
+  const chatter: Chatter | null = chatterRows[0] ?? null;
+  return { issue, gmp: [...gmp], subs: [...subs], snaps: [...snaps], history, refGmp, detail, chatter };
 }
 
 const BANDS: [number, number, string][] = [
