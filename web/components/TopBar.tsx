@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { fmtDate, todayIST } from "@/lib/format";
 import type { Viewer } from "@/lib/viewer";
+import { NavLink, SignInLink } from "./NavLink";
 
-export default function TopBar({ viewer, current }: { viewer?: Viewer | null; current?: "home" | "settings" | "admin" }) {
+export default function TopBar({ viewer }: { viewer?: Viewer | null }) {
   const approved = viewer?.status === "approved";
   const initial = (viewer?.name || viewer?.email || "?").charAt(0).toUpperCase();
   return (
@@ -14,17 +15,15 @@ export default function TopBar({ viewer, current }: { viewer?: Viewer | null; cu
         </Link>
         {approved ? (
           <nav className="site-nav">
-            <Link href="/" aria-current={current === "home" ? "page" : undefined}>
+            <NavLink href="/" exact>
               Live IPOs
-            </Link>
-            <Link href="/settings" aria-current={current === "settings" ? "page" : undefined}>
-              Alerts
-            </Link>
+            </NavLink>
+            <NavLink href="/settings">Alerts</NavLink>
             {viewer?.isAdmin ? (
-              <Link href="/admin" aria-current={current === "admin" ? "page" : undefined}>
+              <NavLink href="/admin">
                 Members
                 {viewer.pending ? <span className="nav-count">{viewer.pending}</span> : null}
-              </Link>
+              </NavLink>
             ) : null}
           </nav>
         ) : (
@@ -48,7 +47,9 @@ export default function TopBar({ viewer, current }: { viewer?: Viewer | null; cu
               </form>
             </div>
           </details>
-        ) : null}
+        ) : (
+          <SignInLink />
+        )}
       </div>
     </header>
   );

@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import TopBar from "@/components/TopBar";
 import GmpChart, { type Series } from "@/components/GmpChart";
 import DecisionButtons from "@/components/DecisionButtons";
 import { Avatar, RadarBadge, StageBadge, StatusBadge } from "@/components/Chips";
@@ -20,7 +19,10 @@ import {
   todayIST,
 } from "@/lib/format";
 import { getIssue, matchesFor, rulesFor, type GmpPoint, type SubPoint } from "@/lib/queries";
-import { requireApproved, viewerId } from "@/lib/viewer";
+import { getViewer, viewerId } from "@/lib/viewer";
+import { Fold, LockedFold } from "@/components/Fold";
+import AlertsPitch from "@/components/AlertsPitch";
+import OpenOnHash from "@/components/OpenOnHash";
 
 export const dynamic = "force-dynamic";
 
@@ -65,13 +67,20 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
   const { slug } = await params;
   const today = todayIST();
   const uid = (await viewerId()) ?? "00000000-0000-0000-0000-000000000000";
-  const [viewer, data, matches, rules] = await Promise.all([
-    requireApproved(),
+  const [viewer, data, allMatches, allRules] = await Promise.all([
+    getViewer(),
     getIssue(slug, uid),
     matchesFor(uid, today),
     rulesFor(uid),
   ]);
   if (!data) notFound();
+  // Signed-out visitors (and accounts still waiting for approval) get the
+  // headline numbers, the GMP chart and subscription; the research sections
+  // and anything personal need an approved account.
+  const member = viewer?.status === "approved";
+  const matches = member ? allMatches : new Map<number, { reasons: string[]; sticky: boolean }>();
+  const rules = member ? allRules : null;
+  const here = `/issue/${slug}`;
   const { issue: i, gmp, subs, snaps, history, refGmp, detail } = data;
   const stage = stageOf(i.open_date, i.close_date, i.listing_date, today);
   const match = matches.get(i.id);
@@ -122,7 +131,6 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
 
   return (
     <>
-      <TopBar viewer={viewer} />
       <main className="wrap">
         <nav className="crumbs" aria-label="Breadcrumb">
           <Link href="/">Live IPOs</Link>
@@ -143,7 +151,17 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
               </div>
             </div>
           </div>
-          {canDecide ? <DecisionButtons slug={i.slug} status={i.status} note={i.note} /> : null}
+          {!canDecide ? null : member ? (
+            <DecisionButtons slug={i.slug} status={i.status} note={i.note} />
+          ) : viewer ? (
+            <span className="badge amber">
+              <span className="dot" aria-hidden /> Account waiting for approval
+            </span>
+          ) : (
+            <Link href={`/signin?next=${encodeURIComponent(here)}`} className="btn primary">
+              Get alerts like this
+            </Link>
+          )}
         </div>
 
         <div className="metrics">
@@ -200,7 +218,9 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
           </div>
         </div>
 
-        {sticky ? (
+        {!viewer ? (
+          <AlertsPitch next={here} compact />
+        ) : sticky ? (
           <div className="warn-line">
             This no longer matches your alerts, but it was in your digest, so it stays on your radar until you mark it
             applied or skipped.
@@ -227,12 +247,13 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
         </div>
 
         <nav className="subnav" aria-label="On this page">
+          <OpenOnHash />
           <a href="#gmp">GMP</a>
           <a href="#subscription">Subscription</a>
           <a href="#anchor">Anchor book</a>
-          {detail?.financials || detail?.kpis ? <a href="#financials">Financials</a> : null}
-          {detail?.peers?.rows?.length ? <a href="#peers">Peers</a> : null}
-          {detail?.objects?.length ? <a href="#objects">Use of funds</a> : null}
+          {!member || detail?.financials || detail?.kpis ? <a href="#financials">Financials</a> : null}
+          {!member || detail?.peers?.rows?.length ? <a href="#peers">Peers</a> : null}
+          {!member || detail?.objects?.length ? <a href="#objects">Use of funds</a> : null}
           <a href="#documents">Documents</a>
         </nav>
 
@@ -331,88 +352,104 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
           </section>
         </div>
 
-        <AnchorBook detail={detail} issueSizeCr={i.issue_size_cr} />
-        <Financials detail={detail} />
-        <Peers detail={detail} companyName={i.name} />
-        <Objects detail={detail} />
+        {member ? (
+          <>
+            <AnchorBook detail={detail} issueSizeCr={i.issue_size_cr} />
+            <Financials detail={detail} />
+            <Peers detail={detail} companyName={i.name} />
+            <Objects detail={detail} />
+            {history && history.n > 0 && refGmp !== null ? (
+              <Fold
+                id="history"
+                title="What history says"
+                summary={
+                  <span className="chip">
+                    similar issues opened a median{" "}
+                    <b className={history.median! >= 0 ? "up" : "down"}>
+                      {history.median! >= 0 ? "+" : ""}
+                      {pct(history.median)}
+                    </b>
+                  </span>
+                }
+              >
+                <p>
+                  Past IPOs with a day-before GMP of <b>{history.label}</b> opened a median{" "}
+                  <b className={history.median! >= 0 ? "up" : "down"}>
+                    {history.median! >= 0 ? "+" : ""}
+                    {pct(history.median)}
+                  </b>
+                  ; {Math.round(history.positive ?? 0)}% opened above the issue price.
+                </p>
+                <p className="xs muted" style={{ marginTop: 8 }}>
+                  {history.n} mainboard issues since 2023, compared on{" "}
+                  {t1 ? "this issue's frozen day-before GMP" : "the current GMP"} ({pct(refGmp)}). Context, not a forecast.
+                </p>
+              </Fold>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <LockedFold id="anchor" title="Anchor book" blurb="Who bought in the anchor round, how much, and how much went to mutual funds." next={here} />
+            <LockedFold id="financials" title="Financials & valuation" blurb="Income, profit, ROE, debt and valuation from the offer document." next={here} />
+            <LockedFold id="peers" title="Listed peers" blurb="The listed companies it compares itself with, side by side." next={here} />
+            <LockedFold id="objects" title="Use of funds" blurb="What the fresh-issue money will be spent on." next={here} />
+            <LockedFold id="history" title="What history says" blurb="How past IPOs with a similar GMP actually listed." next={here} />
+          </>
+        )}
 
-        <div className="grid-3 section">
-          <section className="card" id="documents">
-            <div className="card-head">
-              <h2>Documents &amp; sources</h2>
+        <Fold id="documents" title="Documents & sources" summary={<span className="chip">prospectus, anchor list and GMP sources</span>}>
+          <div className="links">
+            {i.rhp_url ? (
+              <a href={i.rhp_url} target="_blank" rel="noreferrer">
+                <span>Red herring prospectus</span>
+                <span>↗</span>
+              </a>
+            ) : null}
+            {i.anchor_report_url ? (
+              <a href={i.anchor_report_url} target="_blank" rel="noreferrer">
+                <span>Anchor allocation (PDF)</span>
+                <span>↗</span>
+              </a>
+            ) : null}
+            {i.investorgain_url ? (
+              <a href={i.investorgain_url} target="_blank" rel="noreferrer">
+                <span>InvestorGain</span>
+                <span>↗</span>
+              </a>
+            ) : null}
+            {i.ipowatch_url ? (
+              <a href={i.ipowatch_url} target="_blank" rel="noreferrer">
+                <span>IPO Watch GMP</span>
+                <span>↗</span>
+              </a>
+            ) : null}
+          </div>
+        </Fold>
+
+        {member && (t1 || closeSnap) ? (
+          <Fold
+            id="frozen"
+            title="Frozen for calibration"
+            summary={t1 ? <span className="chip">day-before GMP <b>{pct(t1.gmp_pct)}</b></span> : undefined}
+          >
+            <div className="small" style={{ display: "grid", gap: 8 }}>
+              {t1 ? (
+                <div>
+                  <div className="muted xs">Day before opening</div>
+                  GMP {pct(t1.gmp_pct)}
+                </div>
+              ) : null}
+              {closeSnap ? (
+                <div>
+                  <div className="muted xs">Close day</div>
+                  {times(closeSnap.sub_total_x)} total, retail {times(closeSnap.sub_rii_x)}
+                  {closeSnap.gmp_pct !== null ? `, GMP ${pct(closeSnap.gmp_pct)}` : ""}
+                  {viewer?.isAdmin ? ` · decision ${String(closeSnap.extras?.decision ?? "–")}` : ""}
+                </div>
+              ) : null}
             </div>
-            <div className="links">
-              {i.rhp_url ? (
-                <a href={i.rhp_url} target="_blank" rel="noreferrer">
-                  <span>Red herring prospectus</span>
-                  <span>↗</span>
-                </a>
-              ) : null}
-              {i.anchor_report_url ? (
-                <a href={i.anchor_report_url} target="_blank" rel="noreferrer">
-                  <span>Anchor allocation (PDF)</span>
-                  <span>↗</span>
-                </a>
-              ) : null}
-              {i.investorgain_url ? (
-                <a href={i.investorgain_url} target="_blank" rel="noreferrer">
-                  <span>InvestorGain</span>
-                  <span>↗</span>
-                </a>
-              ) : null}
-              {i.ipowatch_url ? (
-                <a href={i.ipowatch_url} target="_blank" rel="noreferrer">
-                  <span>IPO Watch GMP</span>
-                  <span>↗</span>
-                </a>
-              ) : null}
-            </div>
-          </section>
-
-          {history && history.n > 0 && refGmp !== null ? (
-            <section className="card">
-              <div className="card-head">
-                <h2>What history says</h2>
-              </div>
-              <p>
-                Past IPOs with a day-before GMP of <b>{history.label}</b> opened a median{" "}
-                <b className={history.median! >= 0 ? "up" : "down"}>
-                  {history.median! >= 0 ? "+" : ""}
-                  {pct(history.median)}
-                </b>
-                ; {Math.round(history.positive ?? 0)}% opened above the issue price.
-              </p>
-              <p className="xs muted" style={{ marginTop: 8 }}>
-                {history.n} mainboard issues since 2023, compared on{" "}
-                {t1 ? "this issue's frozen day-before GMP" : "the current GMP"} ({pct(refGmp)}). Context, not a forecast.
-              </p>
-            </section>
-          ) : null}
-
-          {t1 || closeSnap ? (
-            <section className="card">
-              <div className="card-head">
-                <h2>Frozen for calibration</h2>
-              </div>
-              <div className="small" style={{ display: "grid", gap: 8 }}>
-                {t1 ? (
-                  <div>
-                    <div className="muted xs">Day before opening</div>
-                    GMP {pct(t1.gmp_pct)}
-                  </div>
-                ) : null}
-                {closeSnap ? (
-                  <div>
-                    <div className="muted xs">Close day</div>
-                    {times(closeSnap.sub_total_x)} total, retail {times(closeSnap.sub_rii_x)}
-                    {closeSnap.gmp_pct !== null ? `, GMP ${pct(closeSnap.gmp_pct)}` : ""}
-                    {viewer.isAdmin ? ` · decision ${String(closeSnap.extras?.decision ?? "–")}` : ""}
-                  </div>
-                ) : null}
-              </div>
-            </section>
-          ) : null}
-        </div>
+          </Fold>
+        ) : null}
       </main>
     </>
   );

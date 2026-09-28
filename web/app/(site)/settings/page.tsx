@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import TopBar from "@/components/TopBar";
 import { db } from "@/lib/db";
 import { todayIST } from "@/lib/format";
 import { describeRules, matchesFor, rulesFor, type Rules } from "@/lib/queries";
@@ -128,15 +127,11 @@ export default async function Settings({ searchParams }: { searchParams: Promise
     email_to: null,
     paused: false,
   };
-  const ids = [...matches.keys()];
-  const names = ids.length
-    ? await db()<{ id: number; slug: string; name: string }[]>`SELECT id, slug, name FROM issues WHERE id = ANY(${ids})`
-    : [];
+  const names = [...matches.entries()].map(([id, m]) => ({ id, slug: m.slug ?? "", name: m.name ?? "" }));
   const ruleText = describeRules(r);
 
   return (
     <>
-      <TopBar viewer={viewer} current="settings" />
       <main className="wrap narrow">
         <div className="page-head">
           <div>

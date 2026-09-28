@@ -269,14 +269,19 @@ export async function setDecision(userId: string, slug: string, decision: Decisi
           note = COALESCE(EXCLUDED.note, user_issue_status.note)`;
 }
 
-export type Match = { reasons: string[]; sticky: boolean };
+export type Match = { reasons: string[]; sticky: boolean; slug?: string; name?: string };
 
 /** The viewer's radar: which issues match their alert rules today. Comes from
- *  the same SQL function the digest uses, so the site and the email agree. */
+ *  the same SQL function the digest uses, so the site and the email agree.
+ *  Slug and name come along so the Alerts page needs no second query. */
 export async function matchesFor(userId: string, today = todayIST()): Promise<Map<number, Match>> {
-  const rows = await db()<{ issue_id: number; reasons: string[]; sticky: boolean }[]>`
-    SELECT issue_id, reasons, sticky FROM user_matches(${today}::date) WHERE user_id = ${userId}::uuid`;
-  return new Map(rows.map((r) => [Number(r.issue_id), { reasons: r.reasons ?? [], sticky: r.sticky }]));
+  const rows = await db()<{ issue_id: number; reasons: string[]; sticky: boolean; slug: string; name: string }[]>`
+    SELECT m.issue_id, m.reasons, m.sticky, i.slug, i.name
+    FROM user_matches(${today}::date) m JOIN issues i ON i.id = m.issue_id
+    WHERE m.user_id = ${userId}::uuid`;
+  return new Map(
+    rows.map((r) => [Number(r.issue_id), { reasons: r.reasons ?? [], sticky: r.sticky, slug: r.slug, name: r.name }]),
+  );
 }
 
 export type Rules = {

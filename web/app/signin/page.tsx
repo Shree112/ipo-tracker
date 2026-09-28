@@ -31,9 +31,9 @@ const ERRORS: Record<string, string> = {
 };
 
 const FEATURES: [string, string][] = [
-  ["Your rules", "Alert on GMP %, expected profit per lot, subscription, anchor book or issue size."],
-  ["One email, at your hour", "Only on days something matches. Mark applied or skip straight from it."],
-  ["Every issue on one page", "GMP history, subscription build-up, anchor investors, financials and peers."],
+  ["Set your rules once", "GMP %, expected profit per lot, subscription, anchor book or issue size. All of them, or any one."],
+  ["We watch every IPO for you", "GMP and subscription checked every hour, and every few minutes on the last day."],
+  ["One email, only when it matters", "At the hour you pick, on days something qualifies. Tap Applied or Skip from your inbox, plus a 1 pm last-day nudge if you want it."],
 ];
 
 export default async function SignIn({ searchParams }: { searchParams: Promise<{ next?: string; error?: string }> }) {
@@ -46,9 +46,10 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<{
           <span className="logo-mark" aria-hidden>IC</span>
           <span>IPO Copilot</span>
         </div>
-        <h1 className="landing-title">A morning brief on the IPOs worth your application.</h1>
+        <h1 className="landing-title">Stop checking GMP every morning.</h1>
         <p className="landing-sub">
-          Mainboard IPOs in India, filtered by the alerts you set, with the numbers that matter in one place.
+          Tell IPO Copilot what makes a mainboard IPO worth applying for. It watches every issue and emails you only when
+          one qualifies.
         </p>
 
         <ul className="features">
@@ -71,6 +72,9 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<{
             <button className="btn primary big" type="submit">
               Continue with Google
             </button>
+            <a className="link small" href="/">
+              Or browse live IPOs first →
+            </a>
             {error ? <p className="small down">{ERRORS[error] ?? "Sign-in was cancelled."}</p> : null}
           </form>
         ) : (

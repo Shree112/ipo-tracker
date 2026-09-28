@@ -1,9 +1,9 @@
 import Link from "next/link";
-import TopBar from "@/components/TopBar";
 import HomeList, { type HomeRow } from "@/components/HomeList";
 import { crore, fmtDate, fmtWhen, pct, sizeSplit, stageOf, times, todayIST } from "@/lib/format";
 import { describeRules, listIssues, matchesFor, rulesFor, type IssueRow, type Match } from "@/lib/queries";
-import { requireApproved, viewerId } from "@/lib/viewer";
+import { getViewer, viewerId } from "@/lib/viewer";
+import AlertsPitch from "@/components/AlertsPitch";
 
 export const dynamic = "force-dynamic";
 
@@ -51,33 +51,66 @@ export default async function Home() {
   // the verified id comes from the middleware, so the data queries start
   // alongside the account check instead of after it
   const uid = (await viewerId()) ?? "00000000-0000-0000-0000-000000000000";
-  const [viewer, issues, matches, rules] = await Promise.all([
-    requireApproved(),
+  const [viewer, issues, allMatches, rules] = await Promise.all([
+    getViewer(),
     listIssues(uid),
     matchesFor(uid, today),
     rulesFor(uid),
   ]);
+  // The list is public; the radar, alerts and Applied/Skip are for approved members.
+  const member = viewer?.status === "approved";
+  const matches = member ? allMatches : new Map<number, Match>();
   const rows = issues.map((i) => toRow(i, today, matches.get(i.id)));
   const radar = rows.filter((r) => r.radar).length;
   const ruleText = describeRules(rules);
+
+  // a live example for the pitch: the open issue with the highest GMP
+  const ex = issues
+    .filter((i) => i.open_date && i.close_date && i.open_date <= today && today <= i.close_date)
+    .map((i) => ({ i, g: (i.gmp_latest ?? []).find((x) => x.source === "investorgain") ?? i.gmp_latest?.[0] }))
+    .filter((x) => x.g)
+    .sort((a, b) => b.g!.gmp_pct - a.g!.gmp_pct)[0];
+  const example = ex
+    ? {
+        name: ex.i.name.replace(/ (Ltd|Limited)\.?$/i, ""),
+        gmp: pct(ex.g!.gmp_pct),
+        size: crore(ex.i.issue_size_cr),
+        closes: fmtDate(ex.i.close_date, true),
+      }
+    : null;
+
   return (
     <>
-      <TopBar viewer={viewer} current="home" />
       <main className="wrap">
         <div className="page-head">
           <div>
             <h1>Live IPOs</h1>
-            <p>
-              Mainboard issues, open and upcoming.{" "}
-              {radar ? `${radar} on your radar` : "Nothing on your radar right now"}
-              {ruleText === "no alerts set" ? "" : ` (${ruleText})`}.{" "}
-              <Link href="/settings" className="link">
-                {ruleText === "no alerts set" ? "Set your alerts" : "Edit alerts"}
-              </Link>
-            </p>
+            {member ? (
+              <p>
+                Mainboard issues, open and upcoming.{" "}
+                {radar ? `${radar} on your radar` : "Nothing on your radar right now"}
+                {ruleText === "no alerts set" ? "" : ` (${ruleText})`}.{" "}
+                <Link href="/settings" className="link">
+                  {ruleText === "no alerts set" ? "Set your alerts" : "Edit alerts"}
+                </Link>
+              </p>
+            ) : (
+              <p>Every mainboard IPO that is open, upcoming or just listed, with GMP and subscription updated through the day.</p>
+            )}
           </div>
         </div>
-        {rows.length ? <HomeList rows={rows} /> : <div className="card empty">Nothing open, upcoming or recently listed.</div>}
+        {!viewer ? (
+          <AlertsPitch example={example} />
+        ) : !member ? (
+          <div className="warn-line" style={{ marginBottom: 16 }}>
+            Your account is waiting for approval. Once you&apos;re in, you&apos;ll set your alerts and get the daily digest.
+          </div>
+        ) : null}
+        {rows.length ? (
+          <HomeList rows={rows} personal={member} />
+        ) : (
+          <div className="card empty">Nothing open, upcoming or recently listed.</div>
+        )}
       </main>
     </>
   );

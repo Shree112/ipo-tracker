@@ -1,11 +1,9 @@
-import TopBar from "@/components/TopBar";
 
 // Rendered instantly on navigation while the page's data loads, so a tap
 // from the list never feels dead.
 export default function Loading() {
   return (
     <>
-      <TopBar />
       <main className="wrap" aria-busy="true" aria-label="Loading">
         <div className="sk" style={{ width: 160, height: 14, marginTop: 26 }} />
         <div className="issue-head">

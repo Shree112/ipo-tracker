@@ -1,7 +1,7 @@
 "use client";
 
 import { useOptimistic, useTransition } from "react";
-import { decide } from "@/app/issue/[slug]/actions";
+import { decide } from "@/app/(site)/issue/[slug]/actions";
 
 type State = { status: string; note: string | null };
 

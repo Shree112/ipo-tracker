@@ -87,7 +87,7 @@ function Row({ r }: { r: HomeRow }) {
   );
 }
 
-export default function HomeList({ rows }: { rows: HomeRow[] }) {
+export default function HomeList({ rows, personal = true }: { rows: HomeRow[]; personal?: boolean }) {
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: rows.length };
     for (const r of rows) {
@@ -96,7 +96,11 @@ export default function HomeList({ rows }: { rows: HomeRow[] }) {
     }
     return c;
   }, [rows]);
-  const [tab, setTab] = useState<(typeof TABS)[number]["key"]>(counts.radar ? "radar" : counts.open ? "open" : "all");
+  // "On radar" only means something to a member with alerts
+  const tabs = personal ? TABS : TABS.filter((t) => t.key !== "radar");
+  const [tab, setTab] = useState<(typeof TABS)[number]["key"]>(
+    personal && counts.radar ? "radar" : counts.open ? "open" : "all",
+  );
 
   const shown = rows.filter((r) =>
     tab === "all" ? true : tab === "radar" ? r.radar : r.group === tab,
@@ -105,7 +109,7 @@ export default function HomeList({ rows }: { rows: HomeRow[] }) {
   return (
     <>
       <div className="tabs" role="tablist" aria-label="Filter IPOs">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button key={t.key} role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)}>
             {t.label}
             <span className="count">{counts[t.key] ?? 0}</span>

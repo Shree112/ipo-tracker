@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import TopBar from "@/components/TopBar";
 import { getViewer } from "@/lib/viewer";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +11,6 @@ export default async function Pending() {
   const first = v.name?.split(" ")[0];
   return (
     <>
-      <TopBar viewer={v} />
       <main className="wrap">
         <div className="center-card">
           <div className="card" style={{ padding: 28, display: "grid", gap: 12 }}>

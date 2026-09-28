@@ -1,5 +1,6 @@
 import type { AnchorInvestor, IssueDetail } from "@/lib/queries";
 import { crore, fmtDate } from "@/lib/format";
+import { Fold } from "./Fold";
 
 // Anchor categories use categorical slots 1-4 of the validated palette, in
 // palette order (so every adjacent pair in the stacked bar is a validated
@@ -171,12 +172,36 @@ export function Financials({ detail }: { detail: IssueDetail | null }) {
     ] as [string, string | null][]
   ).filter((x): x is [string, string] => x[1] !== null);
 
+  const rowVal = (metric: string) => f?.rows.find((r) => r.metric === metric)?.values[0] ?? null;
+  const income = rowVal("Total Income");
+  const pat = rowVal("Profit After Tax");
+  const summary = (
+    <>
+      {f?.periods[0] && income !== null ? (
+        <span className="chip">
+          {f.periods[0]} income <b>{crore(income)}</b>
+        </span>
+      ) : null}
+      {pat !== null ? (
+        <span className="chip">
+          profit <b className={pat < 0 ? "down" : ""}>{crore(pat)}</b>
+        </span>
+      ) : null}
+      {k.roe !== undefined ? (
+        <span className="chip">
+          ROE <b>{k.roe}%</b>
+        </span>
+      ) : null}
+      {k.debt_equity !== undefined ? (
+        <span className="chip">
+          D/E <b>{k.debt_equity}</b>
+        </span>
+      ) : null}
+    </>
+  );
   return (
-    <section className="card section" id="financials">
-      <div className="card-head">
-        <h2>Financials &amp; valuation</h2>
-        <span className="sub">Restated, ₹ crore</span>
-      </div>
+    <Fold id="financials" title="Financials & valuation" summary={summary}>
+      <p className="xs muted" style={{ marginBottom: 8 }}>Restated, ₹ crore</p>
       {f ? (
         <div className="table-wrap">
           <table>
@@ -216,7 +241,7 @@ export function Financials({ detail }: { detail: IssueDetail | null }) {
         </div>
       ) : null}
       <p className="xs muted" style={{ marginTop: 12 }}>From the offer document. The first period may be a part-year.</p>
-    </section>
+    </Fold>
   );
 }
 
@@ -224,12 +249,18 @@ export function Peers({ detail, companyName }: { detail: IssueDetail | null; com
   const p = detail?.peers;
   if (!p || !p.rows.length) return null;
   const first = companyName.toLowerCase().split(" ")[0];
+  const others = p.rows.filter((r, k) => !(k === 0 || r[0].toLowerCase().startsWith(first))).map((r) => r[0]);
+  const summary = (
+    <>
+      <span className="chip">
+        <b>{others.length}</b> listed peer{others.length === 1 ? "" : "s"}
+      </span>
+      {others.length ? <span className="chip">{others.slice(0, 2).join(", ")}{others.length > 2 ? "…" : ""}</span> : null}
+    </>
+  );
   return (
-    <section className="card section" id="peers">
-      <div className="card-head">
-        <h2>Listed peers</h2>
-        <span className="sub">From the offer document{p.as_of ? ` · as on ${fmtDate(p.as_of)}` : ""}</span>
-      </div>
+    <Fold id="peers" title="Listed peers" summary={summary}>
+      <p className="xs muted" style={{ marginBottom: 8 }}>From the offer document{p.as_of ? ` · as on ${fmtDate(p.as_of)}` : ""}</p>
       <div className="table-wrap">
         <table>
           <thead>
@@ -260,7 +291,7 @@ export function Peers({ detail, companyName }: { detail: IssueDetail | null; com
       <p className="xs muted" style={{ marginTop: 12 }}>
         The company picks this peer set itself. The issue&apos;s own P/E is blank here because it depends on the final price.
       </p>
-    </section>
+    </Fold>
   );
 }
 
@@ -268,12 +299,23 @@ export function Objects({ detail }: { detail: IssueDetail | null }) {
   // the source table sometimes ends with a "Total" line - that's not an object
   const o = detail?.objects?.filter((x) => !/^total\b/i.test(x.object.trim()));
   if (!o || !o.length) return null;
+  const top = [...o].sort((a, b) => (b.amount_cr ?? 0) - (a.amount_cr ?? 0))[0];
+  const short = (t: string) => (t.length > 48 ? `${t.slice(0, 46).trim()}…` : t);
+  const summary = (
+    <>
+      <span className="chip">
+        <b>{o.length}</b> use{o.length === 1 ? "" : "s"}
+      </span>
+      {top?.amount_cr ? (
+        <span className="chip">
+          largest: {short(top.object)} <b>{crore(top.amount_cr)}</b>
+        </span>
+      ) : null}
+    </>
+  );
   return (
-    <section className="card section" id="objects">
-      <div className="card-head">
-        <h2>Use of funds</h2>
-        <span className="sub">Fresh-issue proceeds</span>
-      </div>
+    <Fold id="objects" title="Use of funds" summary={summary}>
+      <p className="xs muted" style={{ marginBottom: 8 }}>Fresh-issue proceeds</p>
       <ol className="objects">
         {o.map((x, k) => (
           <li key={k}>
@@ -283,6 +325,6 @@ export function Objects({ detail }: { detail: IssueDetail | null }) {
         ))}
       </ol>
       <p className="xs muted" style={{ marginTop: 12 }}>OFS money goes to the selling shareholders, not the company.</p>
-    </section>
+    </Fold>
   );
 }

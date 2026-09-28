@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import TopBar from "@/components/TopBar";
 import { db } from "@/lib/db";
 import { fmtDate } from "@/lib/format";
 import { getViewer, maxUsers, requireAdmin } from "@/lib/viewer";
@@ -93,7 +92,6 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
 
   return (
     <>
-      <TopBar viewer={viewer} current="admin" />
       <main className="wrap narrow">
         <div className="page-head">
           <div>

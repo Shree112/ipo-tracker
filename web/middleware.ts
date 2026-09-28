@@ -6,7 +6,8 @@ import { NextResponse, type NextRequest } from "next/server";
 //   2. verify the signed-in user (getClaims)
 //   3. hand the verified id/email to the page as request headers, so pages
 //      and server actions don't have to call Supabase again
-// Signed-out visitors go to /signin. Approval (pending/approved) is checked
+// Signed-out visitors can read / and /issue/*; anything else sends them to
+// /signin. Approval (pending/approved) is checked
 // on the page, which needs the database for it.
 //
 // Headers of the same names sent by the browser are always stripped first,
@@ -25,6 +26,9 @@ function devViewer(): { id: string; email: string; name: string } | null {
 export async function middleware(req: NextRequest) {
   const path = req.nextUrl.pathname;
   const onSignin = path === "/signin";
+  // readable without an account: the live list and the issue pages (with the
+  // research sections locked). Everything else needs a signed-in user.
+  const isPublic = path === "/" || path.startsWith("/issue/");
 
   const setCookies: { name: string; value: string; options: object }[] = [];
   const setHeaders: Record<string, string> = {};
@@ -56,7 +60,7 @@ export async function middleware(req: NextRequest) {
   }
 
   let res: NextResponse;
-  if (!viewer && !onSignin) {
+  if (!viewer && !onSignin && !isPublic) {
     const to = req.nextUrl.clone();
     to.pathname = "/signin";
     to.search = path === "/" ? "" : `?next=${encodeURIComponent(path + req.nextUrl.search)}`;
