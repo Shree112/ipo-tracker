@@ -13,6 +13,8 @@ Reddit
   pre-approval for API access). Needs REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET
   and REDDIT_USERNAME (for the User-Agent Reddit asks for). Without them the
   source reports "not_configured" and everything else carries on.
+  Read-only: one search per live IPO, comments from at most 5 threads in the
+  listed subreddits, twice a day. No posting, voting or messaging.
 
 Each fetch returns {status, threads, comments}, comments newest first as
 {id, text, at, score}. Text is trimmed; author names are not kept.
@@ -98,6 +100,9 @@ def fetch_ipowatch(url: str | None) -> dict[str, Any]:
 # --------------------------------------------------------------------- Reddit
 
 REDDIT_AUTH = "https://www.reddit.com/api/v1/access_token"
+# Only threads in these communities are read (the list given in the API access request).
+SUBREDDITS = [x.strip().lower() for x in os.getenv(
+    "REDDIT_SUBREDDITS", "IndianStockMarket,IndiaInvestments,IndianStreetBets,StockMarketIndia").split(",") if x.strip()]
 REDDIT_API = "https://oauth.reddit.com"
 _token: dict[str, Any] = {}
 
@@ -166,6 +171,8 @@ def fetch_reddit(name: str, since_days: int = 45) -> dict[str, Any]:
         d = p["data"]
         title = d.get("title", "")
         if d.get("created_utc", 0) < cutoff or key not in title.lower():
+            continue
+        if str(d.get("subreddit", "")).lower() not in SUBREDDITS:
             continue
         posts.append(d)
     posts.sort(key=lambda d: d.get("num_comments", 0), reverse=True)

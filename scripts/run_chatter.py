@@ -79,6 +79,20 @@ def fetch(conn, issues) -> None:
         conn.commit()
 
 
+def purge_old(conn) -> None:
+    """Comment text is only kept while an issue is live: a week after listing
+    (or two after closing, if it never listed) it's deleted. The summary stays."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """UPDATE issue_chatter c SET comments = NULL
+               FROM issues i WHERE i.id = c.issue_id AND c.comments IS NOT NULL
+                 AND COALESCE(i.listing_date + 7, i.close_date + 14) < %s""",
+            (datetime.now(IST).date(),))
+        if cur.rowcount:
+            print(f"  cleared stored comments for {cur.rowcount} finished issue(s)")
+    conn.commit()
+
+
 def pending(conn, issues, force: bool) -> list[tuple[dict, list, str]]:
     """Issues whose comments changed since their last summary."""
     out = []
@@ -119,6 +133,7 @@ def main() -> None:
         print(f"{len(issues)} live issue(s); Reddit {'on' if chatter.reddit_configured() else 'not configured'}")
         if args.fetch or both:
             fetch(conn, issues)
+            purge_old(conn)
         todo = pending(conn, issues, args.force)
         # too little to summarise: record that straight away, no model needed
         need_model = []
