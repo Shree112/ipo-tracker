@@ -11,7 +11,7 @@ name: live
 
 on:
   schedule:
-    - cron: "5 2 * * *"     # 07:35 IST - refresh, then send the digest (~8am)
+    - cron: "5 2 * * *"     # 07:35 IST - full refresh ahead of the morning digests
     - cron: "45 13 * * *"   # 19:15 IST - refresh only; captures the evening GMP before an open date
   workflow_dispatch:
     inputs:
@@ -40,11 +40,4 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python scripts/apply_schema.py
       - run: python scripts/run_live.py
-      - name: Send the morning digest
-        if: github.event.schedule == '5 2 * * *' || inputs.send_digest
-        run: python scripts/send_digest.py
-        env:
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-          DIGEST_TO: ${{ secrets.DIGEST_TO }}
-          SITE_URL: ${{ secrets.SITE_URL }}
-          LINK_SECRET: ${{ secrets.LINK_SECRET }}
+      # Digests now go out from refresh.yml, hourly, at each person's chosen time.

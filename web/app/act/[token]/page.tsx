@@ -3,6 +3,15 @@ import { redirect } from "next/navigation";
 import { verifyToken } from "@/lib/links";
 import { db } from "@/lib/db";
 import { setDecision } from "@/lib/queries";
+import type { LinkPayload } from "@/lib/links";
+
+/** Whose decision this is: the account in the link, or the admin for old links. */
+async function ownerOf(p: LinkPayload): Promise<string | null> {
+  const [row] = p.u
+    ? await db()<{ id: string }[]>`SELECT user_id::text AS id FROM app_users WHERE user_id = ${p.u}::uuid AND status = 'approved'`
+    : await db()<{ id: string }[]>`SELECT user_id::text AS id FROM app_users WHERE is_admin ORDER BY created_at LIMIT 1`;
+  return row?.id ?? null;
+}
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Confirm" };
@@ -13,7 +22,9 @@ async function confirm(formData: FormData) {
   const v = await verifyToken(token);
   if (!v.ok) redirect(`/act/${encodeURIComponent(token)}`);
   const note = String(formData.get("note") || "").trim().slice(0, 200) || null;
-  await setDecision(v.payload.s, v.payload.d, note);
+  const uid = await ownerOf(v.payload);
+  if (!uid) redirect(`/act/${encodeURIComponent(token)}`);
+  await setDecision(uid, v.payload.s, v.payload.d, note);
   redirect(`/act/${encodeURIComponent(token)}?done=1`);
 }
 
@@ -62,8 +73,19 @@ export default async function ActPage({
   }
 
   const { s: slug, d: decision } = v.payload;
+  const uid = await ownerOf(v.payload);
+  if (!uid) {
+    return shell(
+      <>
+        <h1 style={{ fontSize: 22 }}>This account isn&apos;t active</h1>
+        <p className="muted">The link belongs to an account that has been paused or removed.</p>
+      </>,
+    );
+  }
   const [issue] = await db()<{ name: string; status: string | null }[]>`
-    SELECT i.name, st.status FROM issues i LEFT JOIN issue_status st ON st.issue_id = i.id WHERE i.slug = ${slug}`;
+    SELECT i.name, st.status FROM issues i
+    LEFT JOIN user_issue_status st ON st.issue_id = i.id AND st.user_id = ${uid}::uuid
+    WHERE i.slug = ${slug}`;
   if (!issue) return shell(<h1 style={{ fontSize: 22 }}>Issue not found</h1>);
   const name = issue.name.replace(/ (Ltd|Limited)\.?$/i, "");
 

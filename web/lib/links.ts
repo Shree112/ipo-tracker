@@ -1,13 +1,15 @@
 // Signed one-tap links for the digest's Applied / Skip buttons.
 //
-// token = base64url(JSON {s: slug, d: decision, x: expiry-unix}) + "." +
+// token = base64url(JSON {s: slug, d: decision, x: expiry-unix, u: user id}) + "." +
 //         base64url(HMAC-SHA256(LINK_SECRET, <that first part>))
 //
 // The Python digest signs with the same secret. A link only ever opens a
 // confirmation page; the change itself happens on the POST from that page,
 // so Gmail's link scanner prefetching the URL changes nothing.
 
-export type LinkPayload = { s: string; d: "applied" | "skipped"; x: number };
+// u is the account the digest was sent to. Links from the single-user days
+// have no u; they belong to the admin.
+export type LinkPayload = { s: string; d: "applied" | "skipped"; x: number; u?: string };
 
 function b64urlToBytes(s: string): Uint8Array {
   const pad = s.length % 4 ? "=".repeat(4 - (s.length % 4)) : "";
@@ -50,6 +52,7 @@ export async function verifyToken(token: string): Promise<Verified> {
     return { ok: false, reason: "invalid" };
   }
   if (!payload?.s || !["applied", "skipped"].includes(payload.d)) return { ok: false, reason: "invalid" };
+  if (payload.u !== undefined && !/^[0-9a-f-]{36}$/i.test(payload.u)) return { ok: false, reason: "invalid" };
   if (!payload.x || Date.now() / 1000 > payload.x) return { ok: false, reason: "expired" };
   return { ok: true, payload };
 }

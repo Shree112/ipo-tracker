@@ -12,10 +12,15 @@ export function StatusBadge({ status }: { status: string }) {
   return null;
 }
 
-export function RadarBadge({ sticky }: { sticky: boolean }) {
+export function RadarBadge({ kept, reasons }: { kept: boolean; reasons?: string[] }) {
+  const title = kept
+    ? "No longer matches your alerts; it stays until you mark it applied or skipped"
+    : reasons?.length
+      ? `Matches your alerts: ${reasons.join(", ")}`
+      : "Matches your alerts";
   return (
-    <span className={`badge ${sticky ? "amber" : "green"}`} title={sticky ? "GMP fell back below 10% after crossing it" : "GMP above 10% from the day before opening"}>
-      <span className="dot" aria-hidden /> {sticky ? "On radar · fell below 10%" : "On radar"}
+    <span className={`badge ${kept ? "amber" : "green"}`} title={title}>
+      <span className="dot" aria-hidden /> {kept ? "On radar · kept" : "On radar"}
     </span>
   );
 }

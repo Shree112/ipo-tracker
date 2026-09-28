@@ -296,8 +296,11 @@ def freeze_close_day(conn, today: date) -> list[str]:
     frozen = []
     with conn.cursor() as cur:
         cur.execute(
-            """SELECT i.id, i.name, i.close_date, COALESCE(st.status, 'none') AS decision
+            """SELECT i.id, i.name, i.close_date,
+                      COALESCE(ust.status, st.status, 'none') AS decision   -- the owner's decision
                FROM issues i LEFT JOIN issue_status st ON st.issue_id = i.id
+               LEFT JOIN user_issue_status ust ON ust.issue_id = i.id
+                 AND ust.user_id = (SELECT user_id FROM app_users WHERE is_admin ORDER BY created_at LIMIT 1)
                WHERE i.board = 'mainboard' AND i.close_date BETWEEN %s AND %s
                  AND NOT EXISTS (SELECT 1 FROM signal_snapshot s
                                  WHERE s.issue_id = i.id AND s.phase = 'close_day')""",

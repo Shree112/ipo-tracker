@@ -13,7 +13,8 @@ export type HomeRow = {
   stage: Stage;
   group: "open" | "upcoming" | "awaiting" | "listed";
   radar: boolean;
-  sticky: boolean;
+  kept: boolean;
+  reasons: string[];
   status: string;
   gmp: string;
   gmpSub: string;
@@ -48,7 +49,7 @@ function Row({ r }: { r: HomeRow }) {
           <div className="co-name">{r.name}</div>
           <div className="co-meta">
             <StageBadge stage={r.stage} />
-            {r.radar ? <RadarBadge sticky={r.sticky} /> : null}
+            {r.radar ? <RadarBadge kept={r.kept} reasons={r.reasons} /> : null}
             <StatusBadge status={r.status} />
           </div>
         </div>

@@ -13,7 +13,7 @@ type Props = {
   series: Series[];
   windowStart: number | null; // ms, open date 00:00 IST
   windowEnd: number | null; // ms, close date 24:00 IST
-  threshold: number;
+  threshold: number | null; // the viewer's GMP alert, drawn as a line
 };
 
 const H = 250;
@@ -61,7 +61,7 @@ export default function GmpChart({ series, windowStart, windowEnd, threshold }: 
       t1 += 43_200_000;
     }
     const vs = all.map((p) => p.v);
-    const vMax = Math.max(...vs, threshold);
+    const vMax = Math.max(...vs, threshold ?? -Infinity);
     const vMin = Math.min(...vs, 0);
     const step = niceStep(vMax - vMin);
     const y0 = Math.floor(vMin / step) * step;
@@ -173,11 +173,15 @@ export default function GmpChart({ series, windowStart, windowEnd, threshold }: 
             </g>
           ))}
 
-          {/* trigger line */}
-          <line x1={PAD.l} x2={W - PAD.r} y1={y(threshold)} y2={y(threshold)} stroke="var(--warn)" strokeWidth={1} />
-          <text x={W - PAD.r + 6} y={y(threshold) + 4} fontSize="11" fill="var(--ink-3)">
-            {threshold}% trigger
-          </text>
+          {/* the viewer's GMP alert */}
+          {threshold !== null ? (
+            <g>
+              <line x1={PAD.l} x2={W - PAD.r} y1={y(threshold)} y2={y(threshold)} stroke="var(--warn)" strokeWidth={1} />
+              <text x={W - PAD.r + 6} y={y(threshold) + 4} fontSize="11" fill="var(--ink-3)">
+                {threshold}% alert
+              </text>
+            </g>
+          ) : null}
 
           {/* x ticks */}
           {xTicks.map((t) => (

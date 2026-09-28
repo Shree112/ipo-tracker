@@ -52,8 +52,11 @@ def action_url(i: dict, decision: str) -> str | None:
     import json as _json
 
     expiry = int(datetime.combine(i["close_date"] + timedelta(days=2), time(0, 0), tzinfo=IST).timestamp())
+    payload = {"s": i["slug"], "d": decision, "x": expiry}
+    if i.get("_uid"):
+        payload["u"] = i["_uid"]  # multi-user: the decision belongs to this person
     body = base64.urlsafe_b64encode(
-        _json.dumps({"s": i["slug"], "d": decision, "x": expiry}, separators=(",", ":")).encode()
+        _json.dumps(payload, separators=(",", ":")).encode()
     ).decode().rstrip("=")
     sig = base64.urlsafe_b64encode(
         hmac.new(LINK_SECRET.encode(), body.encode(), hashlib.sha256).digest()
@@ -150,6 +153,53 @@ def load(conn, today: date) -> list[dict]:
                  sticky=(peak is not None and max(current, default=0) <= TRIGGER_PCT))
         out.append(i)
     # within a block: nearest close first, then the hottest GMP
+    out.sort(key=lambda i: (i["close_date"], -(i["now_max"] or 0)))
+    return out
+
+
+def enrich(conn, today: date, ids: list[int]) -> list[dict]:
+    """Issue rows shaped for the renderer, for exactly these ids (the
+    multi-user digest decides membership in SQL - see user_matches())."""
+    if not ids:
+        return []
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT i.id, i.name, i.slug, i.open_date, i.close_date, i.anchor_date,
+                      i.listing_date, i.price_band_low, i.price_band_high, i.lot_size,
+                      i.issue_size_cr, i.fresh_issue_cr, i.ofs_cr, i.pe_ratio,
+                      i.min_order_amount, i.rhp_url, i.anchor_report_url,
+                      i.investorgain_url, i.ipowatch_url
+               FROM issues i WHERE i.id = ANY(%s)""",
+            (ids,),
+        )
+        issues = cur.fetchall()
+        cur.execute(
+            """SELECT issue_id, source, observed_at, gmp_amount, gmp_pct FROM gmp_history
+               WHERE issue_id = ANY(%s) AND gmp_amount IS NOT NULL AND gmp_pct IS NOT NULL
+                 AND observed_at >= %s ORDER BY observed_at""",
+            (ids, ist_start(today - timedelta(days=14))),
+        )
+        readings = cur.fetchall()
+    by_issue: dict[int, list] = {}
+    for r in readings:
+        by_issue.setdefault(r["issue_id"], []).append(r)
+    now = datetime.now(IST)
+    today0 = ist_start(today)
+    out = []
+    for i in issues:
+        rs = by_issue.get(i["id"], [])
+        per_source = {}
+        for src in ("investorgain", "ipowatch"):
+            mine = [r for r in rs if r["source"] == src]
+            if mine:
+                before = [r for r in mine if r["observed_at"] < today0]
+                per_source[src] = {"latest": mine[-1], "prev": before[-1] if before else None,
+                                   "stale": now - mine[-1]["observed_at"] > timedelta(hours=STALE_HOURS)}
+        current = [float(x["latest"]["gmp_pct"]) for x in per_source.values()]
+        block = "closes" if today == i["close_date"] else ("open" if today >= i["open_date"] else "tomorrow")
+        i.update(per_source=per_source, peak=max(current, default=None), now_max=max(current, default=None),
+                 block=block, sticky=False, sub=None)
+        out.append(i)
     out.sort(key=lambda i: (i["close_date"], -(i["now_max"] or 0)))
     return out
 
@@ -281,6 +331,10 @@ def text_row(i: dict, today: date) -> list[str]:
         lines.append("  " + " · ".join(srcs))
     if i["sticky"]:
         lines.append(f"  ! Peaked {i['peak']:.1f}% since T-1, now below 10% - kept until you mark it")
+    if i.get("reasons"):
+        lines.append("  Matched: " + " · ".join(i["reasons"]))
+    elif i.get("kept"):
+        lines.append("  ! No longer meets your alerts - kept until you mark it")
     links = []
     if i["anchor_date"] and i["anchor_date"] <= today and i["anchor_report_url"]:
         links.append(f"Anchor book: {i['anchor_report_url']}")
@@ -369,6 +423,12 @@ def card(i: dict, today: date) -> str:
     sticky = (f'<div style="font-size:13px;color:{C["amber"]};font-weight:600;margin-top:8px;">'
               f'Peaked {i["peak"]:.1f}% since T&minus;1, now below 10% &mdash; kept until you mark it.</div>'
               if i["sticky"] else "")
+    if i.get("reasons"):
+        sticky += (f'<div style="font-size:12.5px;color:{C["muted"]};margin-top:6px;">Matched your alerts: '
+                   f'<b style="color:{C["ink"]};">{e(" · ".join(i["reasons"]))}</b></div>')
+    elif i.get("kept"):
+        sticky += (f'<div style="font-size:13px;color:{C["amber"]};font-weight:600;margin-top:8px;">'
+                   f'No longer meets your alerts &mdash; kept until you mark it.</div>')
     links = []
     if i["anchor_date"] and i["anchor_date"] <= today and i["anchor_report_url"]:
         links.append(("Anchor book", i["anchor_report_url"]))
@@ -412,7 +472,8 @@ def card(i: dict, today: date) -> str:
  </td></tr></table>"""
 
 
-def render_html(issues: list[dict], today: date) -> str:
+def render_html(issues: list[dict], today: date, banner: str = "",
+                scope: str = "mainboard, GMP &gt;10% from T&minus;1") -> str:
     all_link = (f' <a href="{html.escape(SITE_URL)}" style="color:{C["jade"]};">All live IPOs</a>'
                 if SITE_URL else "")
     counts = " · ".join(f"{sum(1 for i in issues if i['block'] == k)} {t.lower()}"
@@ -422,7 +483,7 @@ def render_html(issues: list[dict], today: date) -> str:
 <tr><td style="padding:0 4px;">
   <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:{C['jade']};font-weight:700;">IPO digest</div>
   <div style="font-size:22px;font-weight:700;margin:2px 0 2px;">{today:%A, %d %B}</div>
-  <div style="font-size:13px;color:{C['muted']};margin-bottom:8px;">{html.escape(counts)} · mainboard, GMP &gt;10% from T&minus;1</div>"""]
+  <div style="font-size:13px;color:{C['muted']};margin-bottom:8px;">{html.escape(counts)} · {scope}</div>{banner}"""]
     for key, title in BLOCKS:
         rows = [i for i in issues if i["block"] == key]
         if not rows:

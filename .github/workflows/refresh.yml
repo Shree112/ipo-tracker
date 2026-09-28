@@ -44,6 +44,16 @@ jobs:
       - name: Hourly pass
         if: github.event.schedule == '20 * * * *' || inputs.mode == 'hourly'
         run: python scripts/run_live.py --mode light
+      - name: Digests due this hour
+        if: github.event.schedule == '20 * * * *' || inputs.mode == 'hourly'
+        run: python scripts/send_digests.py
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          LINK_SECRET: ${{ secrets.LINK_SECRET }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          DIGEST_TO: ${{ secrets.DIGEST_TO }}
       - name: Close-day loop (morning half)
         if: github.event.schedule == '40 3 * * 1-5' || inputs.mode == 'closeday'
         run: python scripts/run_live.py --mode light --only-if-closing-today --loop-every 5 --until 13:15

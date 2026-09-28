@@ -19,7 +19,8 @@ import {
   times,
   todayIST,
 } from "@/lib/format";
-import { getIssue, inDigest, TRIGGER_PCT, type GmpPoint, type SubPoint } from "@/lib/queries";
+import { getIssue, matchesFor, rulesFor, type GmpPoint, type SubPoint } from "@/lib/queries";
+import { requireApproved, viewerId } from "@/lib/viewer";
 
 export const dynamic = "force-dynamic";
 
@@ -62,12 +63,20 @@ function SubBars({ sub }: { sub: SubPoint }) {
 
 export default async function IssuePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const data = await getIssue(slug);
+  const today = todayIST();
+  const uid = (await viewerId()) ?? "00000000-0000-0000-0000-000000000000";
+  const [viewer, data, matches, rules] = await Promise.all([
+    requireApproved(),
+    getIssue(slug, uid),
+    matchesFor(uid, today),
+    rulesFor(uid),
+  ]);
   if (!data) notFound();
   const { issue: i, gmp, subs, snaps, history, refGmp, detail } = data;
-  const today = todayIST();
   const stage = stageOf(i.open_date, i.close_date, i.listing_date, today);
-  const digest = inDigest(i, today);
+  const match = matches.get(i.id);
+  const digest = match !== undefined;
+  const threshold = rules?.gmp_pct_min ?? null;
 
   // GMP: InvestorGain is the headline, IPO Watch the cross-check
   const bySource = (src: string) => gmp.filter((p) => p.source === src);
@@ -78,7 +87,7 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
   const prev = latest ? latestBefore(primary, istMidnight(today)) : null;
   const delta = latest && prev && prev !== latest ? latest.gmp_pct - prev.gmp_pct : null;
   const otherLatest = (ig.length ? iw : [])[iw.length - 1] ?? null;
-  const sticky = digest && latest !== null && latest.gmp_pct <= TRIGGER_PCT && (i.peak_since_t1 ?? 0) > TRIGGER_PCT;
+  const sticky = digest && match.sticky && match.reasons.length === 0;
 
   const series: Series[] = [
     { key: "investorgain", label: "InvestorGain", colorVar: "--series-1", points: ig },
@@ -113,7 +122,7 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
 
   return (
     <>
-      <TopBar />
+      <TopBar viewer={viewer} />
       <main className="wrap">
         <nav className="crumbs" aria-label="Breadcrumb">
           <Link href="/">Live IPOs</Link>
@@ -129,7 +138,7 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
               <div className="meta">{meta.join(" · ")}</div>
               <div className="badges">
                 <StageBadge stage={stage} />
-                {digest ? <RadarBadge sticky={sticky} /> : null}
+                {digest ? <RadarBadge kept={sticky} reasons={match.reasons} /> : null}
                 <StatusBadge status={i.status} />
               </div>
             </div>
@@ -193,8 +202,15 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
 
         {sticky ? (
           <div className="warn-line">
-            GMP peaked at {pct(i.peak_since_t1)} after the day before opening and has fallen below {TRIGGER_PCT}%. It stays on your
-            radar until you mark it.
+            This no longer matches your alerts, but it was in your digest, so it stays on your radar until you mark it
+            applied or skipped.
+          </div>
+        ) : digest && match.reasons.length ? (
+          <div className="match-line">
+            <span className="dot" aria-hidden /> On your radar: {match.reasons.join(" · ")}.{" "}
+            <Link href="/settings" className="link">
+              Alert settings
+            </Link>
           </div>
         ) : null}
 
@@ -228,7 +244,7 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
             </div>
             <GmpChart
               series={series}
-              threshold={TRIGGER_PCT}
+              threshold={threshold}
               windowStart={i.open_date ? istMidnight(i.open_date) : null}
               windowEnd={i.close_date ? istMidnight(addDays(i.close_date, 1)) : null}
             />
@@ -389,8 +405,8 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
                   <div>
                     <div className="muted xs">Close day</div>
                     {times(closeSnap.sub_total_x)} total, retail {times(closeSnap.sub_rii_x)}
-                    {closeSnap.gmp_pct !== null ? `, GMP ${pct(closeSnap.gmp_pct)}` : ""} · decision{" "}
-                    {String(closeSnap.extras?.decision ?? "–")}
+                    {closeSnap.gmp_pct !== null ? `, GMP ${pct(closeSnap.gmp_pct)}` : ""}
+                    {viewer.isAdmin ? ` · decision ${String(closeSnap.extras?.decision ?? "–")}` : ""}
                   </div>
                 ) : null}
               </div>

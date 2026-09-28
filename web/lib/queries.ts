@@ -1,7 +1,5 @@
 import { db } from "./db";
-import { addDays, toISODate, todayIST } from "./format";
-
-export const TRIGGER_PCT = 10;
+import { toISODate, todayIST } from "./format";
 
 export type GmpPoint = {
   source: "investorgain" | "ipowatch";
@@ -124,6 +122,7 @@ const ISSUE_COLUMNS = `
 function normalise(r: Record<string, unknown>): IssueRow {
   return {
     ...(r as unknown as IssueRow),
+    id: Number(r.id), // bigint arrives as a string
     open_date: toISODate(r.open_date as Date),
     close_date: toISODate(r.close_date as Date),
     anchor_date: toISODate(r.anchor_date as Date),
@@ -132,24 +131,24 @@ function normalise(r: Record<string, unknown>): IssueRow {
 }
 
 /** Everything worth seeing now: upcoming, open, awaiting listing, listed in the last week. */
-export async function listIssues(): Promise<IssueRow[]> {
+export async function listIssues(userId: string): Promise<IssueRow[]> {
   const today = todayIST();
   const rows = await db().unsafe(
     `SELECT ${ISSUE_COLUMNS}
      FROM issues i
-     LEFT JOIN issue_status st ON st.issue_id = i.id
+     LEFT JOIN user_issue_status st ON st.issue_id = i.id AND st.user_id = $2::uuid
      LEFT JOIN listing_outcome lo ON lo.issue_id = i.id
      WHERE i.board = 'mainboard' AND COALESCE(i.withdrawn, false) = false
        AND i.open_date IS NOT NULL
        AND i.open_date <= $1::date + 30
        AND COALESCE(i.listing_date, i.close_date + 7) >= $1::date - 7
      ORDER BY i.open_date, i.name`,
-    [today],
+    [today, userId],
   );
   return rows.map(normalise);
 }
 
-export async function getIssue(slug: string) {
+export async function getIssue(slug: string, userId: string) {
   const sql = db();
   // One round trip: every query keys on the slug, so none waits for another.
   // (Before, the page made three sequential trips - and with the database in
@@ -159,10 +158,10 @@ export async function getIssue(slug: string) {
     sql.unsafe(
       `SELECT ${ISSUE_COLUMNS}
        FROM issues i
-       LEFT JOIN issue_status st ON st.issue_id = i.id
+       LEFT JOIN user_issue_status st ON st.issue_id = i.id AND st.user_id = $2::uuid
        LEFT JOIN listing_outcome lo ON lo.issue_id = i.id
        WHERE i.slug = $1`,
-      [slug],
+      [slug, userId],
     ),
     sql<GmpPoint[]>`
       SELECT source, observed_at, gmp_amount, gmp_pct, capture_mode
@@ -249,32 +248,90 @@ function pickBand(bands: BandStat[], gmpPct: number) {
 
 export type Decision = "applied" | "skipped" | "undo";
 
-export async function setDecision(slug: string, decision: Decision, note: string | null) {
+export async function setDecision(userId: string, slug: string, decision: Decision, note: string | null) {
   const sql = db();
   const [issue] = await sql<{ id: number }[]>`SELECT id FROM issues WHERE slug = ${slug}`;
   if (!issue) throw new Error("unknown issue");
   if (decision === "undo") {
-    await sql`
-      UPDATE issue_status
-      SET status = CASE WHEN first_notified_at IS NULL THEN 'eligible' ELSE 'notified' END,
-          resolved_at = NULL
-      WHERE issue_id = ${issue.id}`;
+    // back to how it was: on the radar if a digest already carried it,
+    // otherwise no row at all
+    await sql`DELETE FROM user_issue_status
+              WHERE user_id = ${userId}::uuid AND issue_id = ${issue.id} AND first_notified_at IS NULL`;
+    await sql`UPDATE user_issue_status SET status = 'notified', resolved_at = NULL, updated_at = now()
+              WHERE user_id = ${userId}::uuid AND issue_id = ${issue.id}`;
     return;
   }
   await sql`
-    INSERT INTO issue_status (issue_id, status, resolved_at, note)
-    VALUES (${issue.id}, ${decision}, now(), ${note})
-    ON CONFLICT (issue_id) DO UPDATE
-      SET status = EXCLUDED.status, resolved_at = now(),
-          note = COALESCE(EXCLUDED.note, issue_status.note)`;
+    INSERT INTO user_issue_status (user_id, issue_id, status, resolved_at, note)
+    VALUES (${userId}::uuid, ${issue.id}, ${decision}, now(), ${note})
+    ON CONFLICT (user_id, issue_id) DO UPDATE
+      SET status = EXCLUDED.status, resolved_at = now(), updated_at = now(),
+          note = COALESCE(EXCLUDED.note, user_issue_status.note)`;
 }
 
-/** The digest's membership rule, so the site and the email agree. */
-export function inDigest(i: IssueRow, today: string): boolean {
-  if (!i.open_date || !i.close_date) return false;
-  if (today < addDays(i.open_date, -1) || today > i.close_date) return false;
-  if (i.status === "applied" || i.status === "skipped") return false;
-  const current = (i.gmp_latest ?? []).map((g) => g.gmp_pct);
-  const peak = Math.max(i.peak_since_t1 ?? -Infinity, ...current);
-  return i.status === "notified" || peak > TRIGGER_PCT;
+export type Match = { reasons: string[]; sticky: boolean };
+
+/** The viewer's radar: which issues match their alert rules today. Comes from
+ *  the same SQL function the digest uses, so the site and the email agree. */
+export async function matchesFor(userId: string, today = todayIST()): Promise<Map<number, Match>> {
+  const rows = await db()<{ issue_id: number; reasons: string[]; sticky: boolean }[]>`
+    SELECT issue_id, reasons, sticky FROM user_matches(${today}::date) WHERE user_id = ${userId}::uuid`;
+  return new Map(rows.map((r) => [Number(r.issue_id), { reasons: r.reasons ?? [], sticky: r.sticky }]));
+}
+
+export type Rules = {
+  gmp_pct_min: number | null;
+  profit_per_lot_min: number | null;
+  sub_total_min: number | null;
+  sub_retail_min: number | null;
+  sub_qib_min: number | null;
+  anchor_mf_min: number | null;
+  size_min_cr: number | null;
+  size_max_cr: number | null;
+  match_mode: "all" | "any";
+  digest_hour: number;
+  digest_days: "daily" | "weekdays";
+  start_at: "t_minus_1" | "open";
+  last_day_reminder: boolean;
+  email_to: string | null;
+  paused: boolean;
+};
+
+export const RULE_KEYS = [
+  "gmp_pct_min",
+  "profit_per_lot_min",
+  "sub_total_min",
+  "sub_retail_min",
+  "sub_qib_min",
+  "anchor_mf_min",
+  "size_min_cr",
+  "size_max_cr",
+] as const;
+
+export async function rulesFor(userId: string): Promise<Rules | null> {
+  const [r] = await db()<Rules[]>`
+    SELECT gmp_pct_min, profit_per_lot_min, sub_total_min, sub_retail_min, sub_qib_min, anchor_mf_min,
+           size_min_cr, size_max_cr, match_mode, digest_hour, digest_days, start_at, last_day_reminder,
+           email_to, paused
+    FROM alert_rules WHERE user_id = ${userId}::uuid`;
+  return r ?? null;
+}
+
+/** One line describing the rules, e.g. "GMP ≥ 10% or retail ≥ 2x". */
+export function describeRules(r: Rules | null): string {
+  if (!r) return "no alerts set";
+  const n = (x: number) => x.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  const parts = [
+    r.gmp_pct_min !== null ? `GMP ≥ ${n(r.gmp_pct_min)}%` : null,
+    r.profit_per_lot_min !== null ? `profit/lot ≥ ₹${n(r.profit_per_lot_min)}` : null,
+    r.sub_total_min !== null ? `subscribed ≥ ${n(r.sub_total_min)}x` : null,
+    r.sub_retail_min !== null ? `retail ≥ ${n(r.sub_retail_min)}x` : null,
+    r.sub_qib_min !== null ? `QIB ≥ ${n(r.sub_qib_min)}x` : null,
+    r.anchor_mf_min !== null ? `MFs ≥ ${n(r.anchor_mf_min)}% of anchor` : null,
+    r.size_min_cr !== null || r.size_max_cr !== null
+      ? `size ${r.size_min_cr !== null ? `₹${n(r.size_min_cr)}` : "any"}–${r.size_max_cr !== null ? `₹${n(r.size_max_cr)}` : "any"} Cr`
+      : null,
+  ].filter(Boolean);
+  if (!parts.length) return "no alerts set";
+  return parts.join(r.match_mode === "any" ? " or " : " and ");
 }
