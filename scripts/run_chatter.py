@@ -29,7 +29,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import db  # noqa: E402
-from sources import chatter, summarize  # noqa: E402
+from sources import chatter, rhp, summarize  # noqa: E402
 from sources.base import FetchError  # noqa: E402
 from sources.ipowatch import IST  # noqa: E402
 
@@ -39,7 +39,7 @@ MIN_COMMENTS = int(os.getenv("CHATTER_MIN_COMMENTS", "5"))
 def live_issues(conn, only: str | None):
     with conn.cursor() as cur:
         cur.execute(
-            """SELECT id, slug, name, ipowatch_url FROM issues
+            """SELECT id, slug, name, ipowatch_url, rhp_url FROM issues
                WHERE board = 'mainboard' AND NOT COALESCE(withdrawn, false) AND open_date IS NOT NULL
                  AND %(today)s BETWEEN open_date - 3 AND COALESCE(listing_date, close_date + 7)
                  AND (%(only)s::text IS NULL OR slug ILIKE '%%' || %(only)s || '%%')
@@ -79,6 +79,40 @@ def fetch(conn, issues) -> None:
         conn.commit()
 
 
+def ingest_rhp(conn, issues) -> None:
+    """Prospectus text for the chat: once per issue (again only if the link changes)."""
+    for i in issues:
+        if not i["rhp_url"]:
+            continue
+        with conn.cursor() as cur:
+            cur.execute("SELECT url, status FROM rhp_doc WHERE issue_id = %s", (i["id"],))
+            row = cur.fetchone()
+        if row and row["url"] == i["rhp_url"] and row["status"] in ("ok", "blocked", "too_big"):
+            continue
+        status, msg, pages, parts = "ok", None, None, []
+        try:
+            pages, parts = rhp.chunks(rhp.download(rhp.pdf_url(i["rhp_url"])))
+            if not parts:
+                status, msg = "error", "no text in the PDF (scanned images?)"
+        except rhp.RhpError as exc:
+            status, msg = ("blocked" if "robots" in str(exc) else "too_big" if "cap" in str(exc) else "error"), str(exc)
+        except Exception as exc:  # noqa: BLE001
+            status, msg = "error", f"{type(exc).__name__}: {exc}"[:300]
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM rhp_chunk WHERE issue_id = %s", (i["id"],))
+            for n, c in enumerate(parts):
+                cur.execute("INSERT INTO rhp_chunk (issue_id, chunk_no, page, content) VALUES (%s, %s, %s, %s)",
+                            (i["id"], n, c["page"], c["content"].replace("\x00", "")))
+            cur.execute("""INSERT INTO rhp_doc (issue_id, url, pages, chunks, status, message, fetched_at)
+                           VALUES (%s, %s, %s, %s, %s, %s, now())
+                           ON CONFLICT (issue_id) DO UPDATE SET url = EXCLUDED.url, pages = EXCLUDED.pages,
+                             chunks = EXCLUDED.chunks, status = EXCLUDED.status, message = EXCLUDED.message,
+                             fetched_at = now()""",
+                        (i["id"], i["rhp_url"], pages, len(parts), status, msg))
+        conn.commit()
+        print(f"  {i['slug']:<34} prospectus {status:<8} {pages or 0} pages, {len(parts)} chunks {msg or ''}")
+
+
 def purge_old(conn) -> None:
     """Comment text is only kept while an issue is live: a week after listing
     (or two after closing, if it never listed) it's deleted. The summary stays."""
@@ -90,6 +124,9 @@ def purge_old(conn) -> None:
             (datetime.now(IST).date(),))
         if cur.rowcount:
             print(f"  cleared stored comments for {cur.rowcount} finished issue(s)")
+        # prospectus text is only needed while people are deciding
+        cur.execute("""DELETE FROM rhp_chunk c USING issues i WHERE i.id = c.issue_id
+                       AND COALESCE(i.listing_date + 30, i.close_date + 40) < %s""", (datetime.now(IST).date(),))
     conn.commit()
 
 
@@ -145,6 +182,7 @@ def main() -> None:
         print(f"{len(issues)} live issue(s); Reddit {'on' if chatter.reddit_configured() else 'not configured'}")
         if args.fetch or both:
             fetch(conn, issues)
+            ingest_rhp(conn, issues)
             purge_old(conn)
         todo = pending(conn, issues, args.force)
         # too little to summarise: record that straight away, no model needed

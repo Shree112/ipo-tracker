@@ -64,8 +64,9 @@ def action_url(i: dict, decision: str) -> str | None:
     return f"{SITE_URL}/act/{body}.{sig}"
 
 
-def page_url(i: dict) -> str | None:
-    return f"{SITE_URL}/issue/{i['slug']}" if SITE_URL else None
+def page_url(i: dict, src: str = "email") -> str | None:
+    # ?src= lets the site count visits that came from a digest (see the admin dashboard)
+    return f"{SITE_URL}/issue/{i['slug']}?src={src}" if SITE_URL else None
 STALE_HOURS = 36
 SOURCE_LABEL = {"investorgain": "InvestorGain", "ipowatch": "IPO Watch"}
 

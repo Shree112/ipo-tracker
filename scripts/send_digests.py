@@ -38,6 +38,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import db  # noqa: E402
 import send_digest as sd  # noqa: E402
 import after_apply  # noqa: E402
+import health  # noqa: E402
+import notify  # noqa: E402
 from sources.ipowatch import IST  # noqa: E402
 
 REMINDER_HOUR = 13
@@ -64,7 +66,7 @@ def send_email(to: str, subj: str, html_body: str, text_body: str) -> str:
 def due_users(conn, target_hour: int, today: date, only_email: str | None) -> list[dict]:
     with conn.cursor() as cur:
         cur.execute(
-            """SELECT r.*, u.user_id::text AS user_id, u.email, u.name, u.is_admin
+            """SELECT r.*, u.user_id::text AS user_id, u.email, u.name, u.is_admin, u.telegram_chat_id
                FROM app_users u JOIN alert_rules r ON r.user_id = u.user_id
                WHERE u.status = 'approved' AND NOT r.paused""")
         rows = cur.fetchall()
@@ -169,6 +171,32 @@ def account_emails(conn, dry_run: bool) -> None:
         print(f"  told the admin about {n} sign-up(s)")
 
 
+def telegram_digest(issues: list[dict], today: date, title: str) -> tuple[str, list]:
+    """Compact Telegram version: one block per issue, buttons to act or open."""
+    esc = notify.esc
+    lines = [f"<b>{esc(title)}</b>", ""]
+    buttons = []
+    for i in issues:
+        name = i["name"].replace(" Ltd.", "").replace(" Limited", "")
+        src, st = sd.primary_gmp(i)
+        gmp = f"GMP {float(st['latest']['gmp_pct']):.1f}%" if st else "GMP -"
+        when = (f"opens {i['open_date']:%a %d %b}" if i["block"] == "tomorrow"
+                else "closes today" if i["block"] == "closes" else f"closes {i['close_date']:%a %d %b}")
+        lines.append(f"<b>{esc(name)}</b> · {esc(gmp)} · {esc(sd._cr(i['issue_size_cr']))} · {esc(when)}")
+        if i.get("reasons"):
+            lines.append("<i>Matched: " + esc(" · ".join(i["reasons"])) + "</i>")
+        elif i.get("kept"):
+            lines.append("<i>Kept from an earlier digest until you mark it</i>")
+        lines.append("")
+        page = sd.page_url(i, "tg")
+        row = [("Details", page)]
+        if sd.action_url(i, "applied"):
+            row += [("Applied", sd.action_url(i, "applied")), ("Skip", sd.action_url(i, "skipped"))]
+        buttons.append([(f"{name[:18]} · {label}" if label == "Details" else label, url) for label, url in row])
+    lines.append("<i>GMP is an unofficial quote, not advice.</i>")
+    return "\n".join(lines), buttons
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
@@ -203,7 +231,6 @@ def main() -> None:
         users = due_users(conn, target_hour, today, args.user)
         if not users:
             print(f"{today} {target_hour:02d}h: no digests due")
-            return
         for u in users:
             reminder = (target_hour == REMINDER_HOUR and u["last_day_reminder"]
                         and u["digest_hour"] != REMINDER_HOUR and not args.user)
@@ -239,7 +266,12 @@ def main() -> None:
             if args.dry_run:
                 print(f"  {to}: would send '{subj}' ({len(issues)} issues)")
                 continue
-            provider = send_email(to, subj, html_body, text_body)
+            tg_text, tg_buttons = telegram_digest(issues, today, subj)
+            provider = notify.deliver(conn, u, send_email=send_email, subject=subj, html_body=html_body,
+                                      text_body=text_body, tg_text=tg_text, tg_buttons=tg_buttons, what=kind)
+            if not provider:
+                print(f"  {to}: delivery failed - logged, will not retry today")
+                continue
             ids = [i["id"] for i in issues]
             with conn.cursor() as cur:
                 cur.execute(
@@ -258,6 +290,9 @@ def main() -> None:
                         (u["user_id"], iid))
             conn.commit()
             print(f"  {to}: sent {kind} ({len(ids)} issues) via {provider}")
+
+        if not args.user and not args.dry_run:
+            health.check(conn, send_email)
 
         # close out decisions on issues that have ended
         with conn.cursor() as cur:

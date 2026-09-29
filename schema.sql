@@ -545,6 +545,60 @@ ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS onboarded_at timestamptz;
 ALTER TABLE issue_detail ADD COLUMN IF NOT EXISTS about text;
 ALTER TABLE issue_detail ADD COLUMN IF NOT EXISTS about_summary jsonb;
 
+-- ============================================================
+-- Operating the service: usage events, daily visits, health alerts,
+-- Telegram links and prospectus text for the chat.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS app_event (
+  id        bigserial PRIMARY KEY,
+  at        timestamptz NOT NULL DEFAULT now(),
+  user_id   uuid,
+  kind      text NOT NULL,        -- email_click, decision, allotment, preset, rhp_question, email_failed, ...
+  issue_id  bigint,
+  meta      jsonb
+);
+CREATE INDEX IF NOT EXISTS app_event_kind_at_idx ON app_event (kind, at DESC);
+
+CREATE TABLE IF NOT EXISTS app_visit (
+  user_id  uuid NOT NULL,
+  day      date NOT NULL,
+  PRIMARY KEY (user_id, day)
+);
+
+CREATE TABLE IF NOT EXISTS health_alert (
+  key               text PRIMARY KEY,   -- e.g. 'source:investorgain-light', 'gmp-fresh'
+  ok                boolean NOT NULL,
+  since             timestamptz NOT NULL DEFAULT now(),
+  message           text,
+  notified_at       timestamptz
+);
+
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS telegram_chat_id bigint;
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS telegram_link_code text;
+ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS channel text NOT NULL DEFAULT 'email';
+ALTER TABLE alert_rules DROP CONSTRAINT IF EXISTS alert_rules_channel_check;
+ALTER TABLE alert_rules ADD CONSTRAINT alert_rules_channel_check CHECK (channel IN ('email', 'telegram', 'both'));
+
+-- prospectus text, chunked for full-text search (kept while the issue is live)
+CREATE TABLE IF NOT EXISTS rhp_chunk (
+  issue_id  bigint NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  chunk_no  int NOT NULL,
+  page      int NOT NULL,
+  content   text NOT NULL,
+  tsv       tsvector GENERATED ALWAYS AS (to_tsvector('english', content)) STORED,
+  PRIMARY KEY (issue_id, chunk_no)
+);
+CREATE INDEX IF NOT EXISTS rhp_chunk_tsv_idx ON rhp_chunk USING gin (tsv);
+CREATE TABLE IF NOT EXISTS rhp_doc (
+  issue_id    bigint PRIMARY KEY REFERENCES issues(id) ON DELETE CASCADE,
+  url         text NOT NULL,
+  pages       int,
+  chunks      int,
+  status      text NOT NULL DEFAULT 'ok',   -- ok | blocked | error | too_big
+  message     text,
+  fetched_at  timestamptz NOT NULL DEFAULT now()
+);
+
 -- Lock the database away from Supabase's public API. Signing in with Google
 -- means the project's anon key sits with the website, and that key can call
 -- the auto-generated REST API for anything in the public schema that RLS

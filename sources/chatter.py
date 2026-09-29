@@ -48,7 +48,7 @@ def robots_allowed(url: str) -> bool:
     if rp is None:
         rp = robotparser.RobotFileParser()
         try:
-            txt = requests.get(host + "/robots.txt", timeout=config.REQUEST_TIMEOUT,
+            txt = requests.get(host + "/robots.txt", timeout=10,
                                headers={"User-Agent": config.USER_AGENT}).text
             rp.parse(txt.splitlines())
         except requests.RequestException:
@@ -86,12 +86,24 @@ def parse_ipowatch_comments(html: str) -> list[dict[str, Any]]:
     return out[:MAX_COMMENTS]
 
 
+_unreachable: set[str] = set()  # hosts that timed out this run - don't wait on them again
+
+
 def fetch_ipowatch(url: str | None) -> dict[str, Any]:
     if not url:
         return {"status": "no_page", "threads": [], "comments": []}
+    host = urlparse(url).netloc
+    if host in _unreachable:
+        raise base.FetchError(f"{host} unreachable earlier in this run - skipped")
     if not robots_allowed(url):
         return {"status": "blocked", "threads": [], "comments": []}
-    html = base.get(url, save_raw=False)
+    try:
+        # one quick try: comments are nice-to-have, and a slow site shouldn't hold the job for minutes
+        html = base.get(url, save_raw=False, retries=1)
+    except base.FetchError as exc:
+        if "timed out" in str(exc).lower() or "connect" in str(exc).lower():
+            _unreachable.add(host)
+        raise
     comments = parse_ipowatch_comments(html)
     return {"status": "ok", "threads": [{"title": "Comments on the GMP page", "url": url + "#comments", "n": len(comments)}],
             "comments": comments}

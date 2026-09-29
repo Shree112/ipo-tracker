@@ -17,6 +17,7 @@ from __future__ import annotations
 import html
 from datetime import date, datetime, time, timedelta
 
+import notify
 import send_digest as sd
 
 ALLOTMENT_HOURS = (20, 8)   # evening of the allotment date; morning catch-up
@@ -73,6 +74,7 @@ def _applied(conn, where: str, params: tuple) -> list[dict]:
     with conn.cursor() as cur:
         cur.execute(
             f"""SELECT st.user_id::text AS uid, u.email, COALESCE(r.email_to, u.email) AS to_addr,
+                       r.channel, u.telegram_chat_id,
                        i.id, i.slug, i.name, i.close_date, i.listing_date, i.allotment_date, i.registrar,
                        i.price_band_high, i.lot_size, st.allotment, st.note
                 FROM user_issue_status st
@@ -187,7 +189,14 @@ def listing_emails(conn, today: date, target_hour: int, send, dry_run: bool) -> 
         if dry_run:
             print(f"  {to}: would send '{subj}'")
             continue
-        send(to, subj, body, "\n".join(text) + "\n")
+        tg = "<b>Listing today</b>\n\n" + "\n".join(
+            f"<b>{notify.esc(i['name'].replace(' Ltd.', ''))}</b>: your shares list today. Pre-open 9:00-9:45, trading from 10:00."
+            for i in items)
+        u = {**items[0], "user_id": uid}
+        if not notify.deliver(conn, u, send_email=send, subject=subj, html_body=body, text_body="\n".join(text) + "\n",
+                              tg_text=tg, tg_buttons=[[("Open " + i["name"].replace(" Ltd.", "")[:20], sd.page_url(i, "tg"))] for i in items],
+                              what="listing"):
+            continue
         with conn.cursor() as cur:
             cur.execute("""UPDATE user_issue_status SET listing_mailed_at = now()
                            WHERE user_id = %s::uuid AND issue_id = ANY(%s)""", (uid, [i["id"] for i in items]))

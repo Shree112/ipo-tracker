@@ -14,7 +14,11 @@ import config
 @contextlib.contextmanager
 def connect() -> Iterator[psycopg.Connection]:
     """One connection, committed on clean exit, rolled back on error."""
-    conn = psycopg.connect(config.database_url(), row_factory=dict_row)
+    # prepare_threshold=None: never create server-side prepared statements.
+    # Supabase's pooler can hand the connection a different backend between
+    # statements, and a reused name then fails with "prepared statement
+    # _pg3_0 already exists" (seen in the chatter job).
+    conn = psycopg.connect(config.database_url(), row_factory=dict_row, prepare_threshold=None)
     try:
         yield conn
         conn.commit()
