@@ -154,8 +154,8 @@ def write_detail(conn, issue_id: int, d: dict | None) -> None:
     with conn.cursor() as cur:
         cur.execute(
             """INSERT INTO issue_detail (issue_id, anchor, anchor_summary, anchor_lockin_30, anchor_lockin_90,
-                                         financials, peers, objects, kpis, updated_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
+                                         financials, peers, objects, kpis, about, updated_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
                ON CONFLICT (issue_id) DO UPDATE SET
                  anchor           = COALESCE(EXCLUDED.anchor, issue_detail.anchor),
                  anchor_summary   = COALESCE(EXCLUDED.anchor_summary, issue_detail.anchor_summary),
@@ -165,10 +165,11 @@ def write_detail(conn, issue_id: int, d: dict | None) -> None:
                  peers            = COALESCE(EXCLUDED.peers, issue_detail.peers),
                  objects          = COALESCE(EXCLUDED.objects, issue_detail.objects),
                  kpis             = COALESCE(EXCLUDED.kpis, issue_detail.kpis),
+                 about            = COALESCE(EXCLUDED.about, issue_detail.about),
                  updated_at       = now()""",
             (issue_id, J(d.get("anchor") if summary else None), J(summary), d.get("anchor_lockin_30"),
              d.get("anchor_lockin_90"), J(d.get("financials")), J(d.get("peers")), J(d.get("objects")),
-             J(d.get("kpis"))),
+             J(d.get("kpis")), d.get("about")),
         )
 
 

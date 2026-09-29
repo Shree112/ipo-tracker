@@ -24,6 +24,7 @@ import { Fold, LockedFold } from "@/components/Fold";
 import AlertsPitch from "@/components/AlertsPitch";
 import OpenOnHash from "@/components/OpenOnHash";
 import Chatter from "@/components/Chatter";
+import AboutCompany from "@/components/AboutCompany";
 import AllotmentCard from "@/components/AllotmentCard";
 import { BSE_STATUS, registrarLink } from "@/lib/registrars";
 
@@ -268,6 +269,8 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
             ))}
           </div>
         </div>
+
+        <AboutCompany detail={detail} shortName={shortName} sourceUrl={i.investorgain_url} />
 
         <nav className="subnav" aria-label="On this page">
           <OpenOnHash />

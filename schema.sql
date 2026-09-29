@@ -539,6 +539,12 @@ ALTER TABLE user_digest_run ADD CONSTRAINT user_digest_run_kind_check
 -- first sign-in: null until the member picks a starting set of rules
 ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS onboarded_at timestamptz;
 
+-- "What the company does": the issue page's own description (source text,
+-- kept for re-summarising) and a short summary written by the comment
+-- summariser's model, so the site shows its own words rather than a copy.
+ALTER TABLE issue_detail ADD COLUMN IF NOT EXISTS about text;
+ALTER TABLE issue_detail ADD COLUMN IF NOT EXISTS about_summary jsonb;
+
 -- Lock the database away from Supabase's public API. Signing in with Google
 -- means the project's anon key sits with the website, and that key can call
 -- the auto-generated REST API for anything in the public schema that RLS

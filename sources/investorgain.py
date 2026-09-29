@@ -423,7 +423,22 @@ def parse_detail(html: str) -> dict[str, Any]:
         "peers": _peers(_resolve(flight, ipo.get("peer_analysis")), ipo.get("peer_group_date")),
         "objects": _objects(_resolve(flight, ipo.get("issue_objects"))),
         "kpis": {k: v for k, v in kpis.items() if v is not None} or None,
+        "about": _about(_resolve(flight, ipo.get("about_company")) or _resolve(flight, ipo.get("company_desc"))),
     }
+
+
+def _about(html_text: str | None) -> str | None:
+    """The company description as plain paragraphs (blank-line separated)."""
+    if not html_text:
+        return None
+    soup = BeautifulSoup(html_text, "lxml")
+    parts = []
+    for el in soup.find_all(["p", "li"]):
+        t = re.sub(r"\s+", " ", el.get_text(" ")).strip()
+        if t:
+            parts.append(("• " if el.name == "li" else "") + t)
+    text = "\n\n".join(parts) or re.sub(r"\s+", " ", soup.get_text(" ")).strip()
+    return text[:6000] or None
 
 
 # ---------------------------------------------------------------- light refresh

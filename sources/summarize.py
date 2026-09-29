@@ -127,3 +127,58 @@ def summarise(name: str, comments: list[dict[str, Any]]) -> dict[str, Any] | Non
 
 def model_label() -> str:
     return f"{PROVIDER}:{MODEL}"
+
+
+# ------------------------------------------------------------ company profile
+
+COMPANY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "one_liner": {"type": "string"},
+        "points": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["one_liner", "points"],
+}
+
+COMPANY_SYSTEM = """You explain what a company does to a retail investor, in plain English.
+You get the company description from an IPO page. Return JSON only, with exactly these keys:
+- "one_liner": one sentence (max 22 words) saying what the company does and for whom.
+- "points": 3 or 4 short bullets (max 16 words each) covering: main products or services, key customers or markets, scale (plants, users, locations) and anything distinctive.
+Rules: use only facts in the text; keep numbers exactly as given; no praise words like "leading" or "renowned"; no investment opinion; write in your own words, don't copy sentences."""
+
+
+def summarise_company(name: str, about: str) -> dict[str, Any] | None:
+    user = f"Company: {name}\n\nDescription:\n{about[:INPUT_CHARS]}"
+    for _ in range(2):
+        try:
+            if PROVIDER == "ollama":
+                r = requests.post(f"{BASE_URL}/api/chat", timeout=TIMEOUT, json={
+                    "model": MODEL, "stream": False, "think": False, "format": COMPANY_SCHEMA,
+                    "options": {"temperature": 0.2, "num_ctx": 8192},
+                    "messages": [{"role": "system", "content": COMPANY_SYSTEM}, {"role": "user", "content": user}],
+                })
+                r.raise_for_status()
+                raw = r.json()["message"]["content"]
+            else:
+                r = requests.post(f"{BASE_URL}/chat/completions", timeout=TIMEOUT,
+                                  headers={"Authorization": f"Bearer {API_KEY}"} if API_KEY else {},
+                                  json={"model": MODEL, "temperature": 0.2, "response_format": {"type": "json_object"},
+                                        "messages": [{"role": "system", "content": COMPANY_SYSTEM},
+                                                     {"role": "user", "content": user}]})
+                r.raise_for_status()
+                raw = r.json()["choices"][0]["message"]["content"]
+        except (requests.RequestException, KeyError, ValueError):
+            continue
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.S)
+        m = re.search(r"\{.*\}", raw, flags=re.S)
+        if not m:
+            continue
+        try:
+            d = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            continue
+        one = _short(d.get("one_liner"), 26)
+        pts = [_short(p, 20) for p in (d.get("points") or []) if str(p).strip()][:4]
+        if one and len(pts) >= 2:
+            return {"one_liner": one, "points": pts}
+    return None

@@ -58,6 +58,8 @@ export type IssueDetail = {
     | "promoter_pre_pct" | "promoter_post_pct" | "ebitda_margin",
     number
   >> | null;
+  about: string | null;
+  about_summary: { one_liner: string; points: string[] } | null;
   updated_at: Date;
 };
 
@@ -191,9 +193,15 @@ export async function getIssue(slug: string, userId: string) {
     // failing the whole page.
     sql<IssueDetail[]>`
       SELECT anchor, anchor_summary, anchor_lockin_30, anchor_lockin_90,
-             financials, peers, objects, kpis, updated_at
+             financials, peers, objects, kpis, about, about_summary, updated_at
       FROM issue_detail WHERE issue_id = ${bySlug()}`.catch((e: { code?: string }) => {
-      if (e?.code === "42P01" || e?.code === "42703") return [] as IssueDetail[];
+      if (e?.code === "42P01") return [] as IssueDetail[];
+      // before the "about" columns exist: the rest of the research still shows
+      if (e?.code === "42703")
+        return sql<IssueDetail[]>`
+          SELECT anchor, anchor_summary, anchor_lockin_30, anchor_lockin_90,
+                 financials, peers, objects, kpis, NULL AS about, NULL AS about_summary, updated_at
+          FROM issue_detail WHERE issue_id = ${bySlug()}`.catch(() => [] as IssueDetail[]);
       throw e;
     }),
     baseRates(),

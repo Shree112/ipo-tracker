@@ -108,6 +108,18 @@ def pending(conn, issues, force: bool) -> list[tuple[dict, list, str]]:
     return out
 
 
+def pending_about(conn, issues, force: bool) -> list[tuple[dict, str]]:
+    """Live issues with a company description but no profile summary yet."""
+    out = []
+    with conn.cursor() as cur:
+        for i in issues:
+            cur.execute("SELECT about, about_summary FROM issue_detail WHERE issue_id = %s", (i["id"],))
+            row = cur.fetchone()
+            if row and row["about"] and (force or not row["about_summary"]):
+                out.append((i, row["about"]))
+    return out
+
+
 def save_summary(conn, issue_id: int, h: str, n: int, summary, model: str | None) -> None:
     with conn.cursor() as cur:
         cur.execute(
@@ -143,13 +155,24 @@ def main() -> None:
                 print(f"  {i['slug']:<34} {len(comments)} comments - not enough to summarise")
             else:
                 need_model.append((i, comments, h))
+        about_todo = pending_about(conn, issues, args.force)
         if args.fetch and not args.summarise:
-            flag = "true" if need_model else "false"
-            print(f"needs_llm={flag} ({len(need_model)} issue(s))")
+            flag = "true" if need_model or about_todo else "false"
+            print(f"needs_llm={flag} ({len(need_model)} comment summaries, {len(about_todo)} company profiles)")
             if os.getenv("GITHUB_OUTPUT"):
                 with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
                     fh.write(f"needs_llm={flag}\n")
             return
+        for i, about in about_todo:
+            prof = summarize.summarise_company(i["name"], about)
+            if prof is None:
+                print(f"  {i['slug']:<34} company profile: no usable answer; will retry next run")
+                continue
+            with conn.cursor() as cur:
+                cur.execute("UPDATE issue_detail SET about_summary = %s WHERE issue_id = %s",
+                            (json.dumps({**prof, "model": summarize.model_label()}), i["id"]))
+            conn.commit()
+            print(f"  {i['slug']:<34} profile: {prof['one_liner']}")
         for i, comments, h in need_model:
             s = summarize.summarise(i["name"], comments)
             if s is None:
