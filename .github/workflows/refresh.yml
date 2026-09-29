@@ -54,6 +54,7 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           DIGEST_TO: ${{ secrets.DIGEST_TO }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       - name: Close-day loop (morning half)
         if: github.event.schedule == '40 3 * * 1-5' || inputs.mode == 'closeday'
         run: python scripts/run_live.py --mode light --only-if-closing-today --loop-every 5 --until 13:15

@@ -2,6 +2,7 @@ import { cache } from "react";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "./db";
+import { recordVisit } from "./events";
 
 // Who is looking at the page. The middleware has already verified the
 // Supabase session and passed the user's id and email in request headers;
@@ -77,6 +78,7 @@ export const getViewer = cache(async (): Promise<Viewer | null> => {
     await ensureAccount(v.id, v.email, v.name);
     [row] = await load();
   }
+  if (row.status === "approved") recordVisit(v.id);
   return { id: v.id, email: row.email, name: row.name, status: row.status, isAdmin: row.is_admin, pending: row.pending };
 });
 

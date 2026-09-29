@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { verifyToken } from "@/lib/links";
 import { db } from "@/lib/db";
 import { setAllotment, setDecision } from "@/lib/queries";
+import { logEvent } from "@/lib/events";
 import type { LinkPayload } from "@/lib/links";
 
 /** Whose decision this is: the account in the link, or the admin for old links. */
@@ -24,8 +25,13 @@ async function confirm(formData: FormData) {
   const note = String(formData.get("note") || "").trim().slice(0, 200) || null;
   const uid = await ownerOf(v.payload);
   if (!uid) redirect(`/act/${encodeURIComponent(token)}`);
-  if (v.payload.d === "allotted" || v.payload.d === "not_allotted") await setAllotment(uid, v.payload.s, v.payload.d);
-  else await setDecision(uid, v.payload.s, v.payload.d, note);
+  if (v.payload.d === "allotted" || v.payload.d === "not_allotted") {
+    await setAllotment(uid, v.payload.s, v.payload.d);
+    logEvent("allotment", uid, v.payload.s, { result: v.payload.d, source: "email" });
+  } else {
+    await setDecision(uid, v.payload.s, v.payload.d, note);
+    logEvent("decision", uid, v.payload.s, { decision: v.payload.d, source: "email" });
+  }
   redirect(`/act/${encodeURIComponent(token)}?done=1`);
 }
 

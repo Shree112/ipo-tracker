@@ -51,7 +51,7 @@ export default function AllotmentCard({
             {pending ? <span className="muted small"> · saving…</span> : null}
           </p>
         ) : out ? (
-          <p className="allot-head">Allotment is out. Check yours in 30 seconds.</p>
+          <p className="allot-head">Allotment should be out. Check yours in 30 seconds.</p>
         ) : (
           <p className="allot-head">Allotment on {allotmentLabel}.</p>
         )}
@@ -62,7 +62,7 @@ export default function AllotmentCard({
               : "Nothing more to do for this one."
             : out
               ? `On the ${registrarLabel} page, pick this company, choose PAN and enter yours. Then mark it here: tap Got shares and we'll email you on listing morning.`
-              : `Registrar: ${registrar ?? "not listed yet"}. We'll email you that evening with the link.`}
+              : `Registrar: ${registrar ?? "not listed yet"}. Results usually appear late that evening or the next morning; the link shows up here then.`}
         </p>
       </div>
       <div className="allot-actions">

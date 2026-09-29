@@ -90,7 +90,8 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   // Not for: the OAuth callback and sign-out (they handle the session
-  // themselves), the public privacy and terms pages, /act/<token> (the email buttons carry their own signature,
+  // themselves), /api/* (the Telegram webhook checks its own secret), the
+  // public privacy and terms pages, /act/<token> (the email buttons carry their own signature,
   // so they work on a phone that has never signed in), and static assets.
-  matcher: ["/((?!auth/|act/|privacy$|terms$|_next/static|_next/image|favicon.ico|robots.txt).*)"],
+  matcher: ["/((?!api/|auth/|act/|privacy$|terms$|_next/static|_next/image|favicon.ico|robots.txt).*)"],
 };

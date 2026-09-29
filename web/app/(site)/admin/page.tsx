@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import AdminTabs from "@/components/AdminTabs";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { fmtDate } from "@/lib/format";
@@ -95,11 +96,13 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
       <main className="wrap narrow">
         <div className="page-head">
           <div>
-            <h1>Members</h1>
+            <div className="eyebrow">Admin</div>
+            <h1 style={{ marginTop: 10 }}>Members</h1>
             <p>
               {approved.length} of {cap} places taken{pending.length ? ` · ${pending.length} waiting` : ""}.
             </p>
           </div>
+          <AdminTabs current="members" pending={pending.length} />
         </div>
         <div className="capbar" aria-hidden>
           <span style={{ width: `${Math.min(100, (approved.length / cap) * 100)}%` }} />

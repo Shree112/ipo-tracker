@@ -5,9 +5,20 @@ import { usePathname } from "next/navigation";
 
 // The header is rendered once in the layout, so which tab is current (and
 // where "Sign in" should return to) is worked out in the browser.
-export function NavLink({ href, exact, children }: { href: string; exact?: boolean; children: React.ReactNode }) {
+export function NavLink({
+  href,
+  exact,
+  match,
+  children,
+}: {
+  href: string;
+  exact?: boolean;
+  match?: string; // highlight for this path prefix instead of href
+  children: React.ReactNode;
+}) {
   const path = usePathname();
-  const current = exact ? path === href : path === href || path.startsWith(`${href}/`);
+  const base = match ?? href;
+  const current = exact ? path === href : path === base || path.startsWith(`${base}/`);
   return (
     <Link href={href} aria-current={current ? "page" : undefined}>
       {children}

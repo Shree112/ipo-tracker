@@ -771,3 +771,26 @@ p.preset-stats { display: block; }
 .about-line.small-serif { font-size: 20px; }
 .about .chatter-points { max-width: 820px; }
 @media (max-width: 640px) { .about-line { font-size: 20px; } }
+
+/* admin dashboard */
+.dash-h { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.14em; color: var(--accent); margin: 34px 0 12px; }
+.admin-tabs a { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px; font-size: 13.5px; font-weight: 550; color: var(--ink-3); }
+.admin-tabs a[aria-selected="true"] { background: var(--ink); color: var(--page); }
+.admin-tabs .count { font-size: 12px; opacity: 0.7; }
+.daybars { margin-top: 4px; }
+.tg-card { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
+.tg-card .grow { flex: 1 1 280px; }
+
+/* ask the prospectus */
+.ask-form { display: flex; gap: 8px; }
+.ask-form .input { flex: 1; height: 44px; }
+.ask-form .btn { height: 44px; }
+.chip-btn { border: 0; cursor: pointer; font: inherit; font-size: 12.5px; color: var(--ink-2); }
+.chip-btn:hover { background: var(--surface-3); color: var(--ink); }
+.chip-btn[disabled] { opacity: 0.5; cursor: progress; }
+.ask-qa { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); animation: fold-in 0.3s var(--ease) both; }
+.ask-q { font-weight: 600; }
+.ask-a { margin-top: 6px; color: var(--ink-2); white-space: pre-wrap; line-height: 1.6; }
+.health-list { display: block; }
+.health-list ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; font-weight: 400; }
+.kpi .small-btn { white-space: nowrap; }

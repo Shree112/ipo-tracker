@@ -20,11 +20,14 @@ import {
 } from "@/lib/format";
 import { getIssue, matchesFor, rulesFor, type GmpPoint, type SubPoint } from "@/lib/queries";
 import { getViewer, viewerId } from "@/lib/viewer";
+import { logEvent } from "@/lib/events";
 import { Fold, LockedFold } from "@/components/Fold";
 import AlertsPitch from "@/components/AlertsPitch";
 import OpenOnHash from "@/components/OpenOnHash";
 import Chatter from "@/components/Chatter";
 import AboutCompany from "@/components/AboutCompany";
+import AskProspectus from "@/components/AskProspectus";
+import { askReady, prospectusStatus } from "@/lib/ask";
 import AllotmentCard from "@/components/AllotmentCard";
 import { BSE_STATUS, registrarLink } from "@/lib/registrars";
 
@@ -67,17 +70,25 @@ function SubBars({ sub }: { sub: SubPoint }) {
   );
 }
 
-export default async function IssuePage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params;
+export default async function IssuePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ src?: string }>;
+}) {
+  const [{ slug }, { src }] = await Promise.all([params, searchParams]);
   const today = todayIST();
   const uid = await viewerId();
-  const [viewer, data, allMatches, allRules] = await Promise.all([
+  const [viewer, data, allMatches, allRules, rhpDoc] = await Promise.all([
     getViewer(),
     getIssue(slug, uid),
     matchesFor(uid, today),
     rulesFor(uid),
+    askReady() && uid ? prospectusStatus(slug) : Promise.resolve(null),
   ]);
   if (!data) notFound();
+  if (src === "email" || src === "tg") logEvent(src === "email" ? "email_click" : "tg_click", viewer?.id ?? null, slug);
   // Signed-out visitors (and accounts still waiting for approval) get the
   // headline numbers, the GMP chart and subscription; the research sections
   // and anything personal need an approved account.
@@ -381,6 +392,31 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
 
         {member ? (
           <>
+            {askReady() ? (
+              <Fold
+                id="ask"
+                title="Ask the prospectus"
+                summary={
+                  <span className="chip">
+                    {rhpDoc?.status === "ok" ? `${rhpDoc.pages} pages loaded · answers cite pages` : "prospectus not loaded yet"}
+                  </span>
+                }
+              >
+                {rhpDoc?.status === "ok" ? (
+                  <AskProspectus slug={i.slug} rhpUrl={i.rhp_url} pages={rhpDoc.pages} />
+                ) : (
+                  <p className="small muted">
+                    The prospectus for this IPO hasn&apos;t been loaded yet (it&apos;s picked up twice a day once the RHP is
+                    published){i.rhp_url ? ". You can still read it directly: " : "."}
+                    {i.rhp_url ? (
+                      <a className="link" href={i.rhp_url} target="_blank" rel="noreferrer">
+                        open the prospectus ↗
+                      </a>
+                    ) : null}
+                  </p>
+                )}
+              </Fold>
+            ) : null}
             <Chatter data={chatter} today={today} />
             <AnchorBook detail={detail} issueSizeCr={i.issue_size_cr} />
             <Financials detail={detail} />
@@ -417,6 +453,7 @@ export default async function IssuePage({ params }: { params: Promise<{ slug: st
           </>
         ) : (
           <>
+            <LockedFold id="ask" title="Ask the prospectus" blurb="Ask plain-English questions about the red herring prospectus and get answers with page numbers." next={here} />
             <LockedFold id="chatter" title="What investors are saying" blurb="An AI summary of what people on Reddit and IPO Watch are saying about this IPO." next={here} />
             <LockedFold id="anchor" title="Anchor book" blurb="Who bought in the anchor round, how much, and how much went to mutual funds." next={here} />
             <LockedFold id="financials" title="Financials & valuation" blurb="Income, profit, ROE, debt and valuation from the offer document." next={here} />

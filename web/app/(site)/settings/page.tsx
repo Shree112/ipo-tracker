@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { todayIST } from "@/lib/format";
 import { describeRules, matchesFor, rulesFor, type Rules } from "@/lib/queries";
 import { getViewer, requireApproved, viewerId } from "@/lib/viewer";
+import { botUsername, newLinkCode, telegramReady } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Alerts" };
@@ -67,8 +68,28 @@ async function save(fd: FormData) {
       last_day_reminder = EXCLUDED.last_day_reminder, email_to = EXCLUDED.email_to,
       paused = EXCLUDED.paused, updated_at = now()`;
   await db()`UPDATE alert_rules SET onboarded_at = COALESCE(onboarded_at, now()) WHERE user_id = ${v.id}::uuid`.catch(() => undefined);
+  const channel = String(fd.get("channel") ?? "email");
+  if (["email", "telegram", "both"].includes(channel))
+    await db()`UPDATE alert_rules SET channel = ${channel} WHERE user_id = ${v.id}::uuid`.catch(() => undefined);
   revalidatePath("/settings");
   redirect("/settings?saved=1");
+}
+
+async function connectTelegram() {
+  "use server";
+  const v = await getViewer();
+  if (!v || v.status !== "approved" || !telegramReady()) redirect("/settings");
+  const code = await newLinkCode(v.id);
+  redirect(`https://t.me/${botUsername()}?start=${code}`);
+}
+
+async function disconnectTelegram() {
+  "use server";
+  const v = await getViewer();
+  if (!v || v.status !== "approved") redirect("/signin");
+  await db()`UPDATE app_users SET telegram_chat_id = NULL WHERE user_id = ${v.id}::uuid`;
+  await db()`UPDATE alert_rules SET channel = 'email' WHERE user_id = ${v.id}::uuid`.catch(() => undefined);
+  revalidatePath("/settings");
 }
 
 const hourLabel = (h: number) => `${((h + 11) % 12) + 1}:00 ${h < 12 ? "am" : "pm"}`;
@@ -110,7 +131,18 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   const { saved } = await searchParams;
   const today = todayIST();
   const uid = await viewerId();
-  const [viewer, rules, matches] = await Promise.all([requireApproved(), rulesFor(uid), matchesFor(uid, today)]);
+  const [viewer, rules, matches, tgRow] = await Promise.all([
+    requireApproved(),
+    rulesFor(uid),
+    matchesFor(uid, today),
+    uid
+      ? db()<{ chat: string | null; channel: string | null }[]>`
+          SELECT u.telegram_chat_id::text AS chat, r.channel FROM app_users u LEFT JOIN alert_rules r ON r.user_id = u.user_id
+          WHERE u.user_id = ${uid}::uuid`.catch(() => [])
+      : Promise.resolve([]),
+  ]);
+  const tgLinked = Boolean(tgRow[0]?.chat);
+  const channel = tgRow[0]?.channel ?? "email";
   const r: Rules = rules ?? {
     gmp_pct_min: 10,
     profit_per_lot_min: null,
@@ -247,6 +279,17 @@ export default async function Settings({ searchParams }: { searchParams: Promise
               </label>
               <input id="email_to" name="email_to" type="email" className="input" defaultValue={r.email_to ?? ""} placeholder={viewer.email} />
             </div>
+            <div className="field-row">
+              <label htmlFor="channel">
+                <span>Deliver by</span>
+                <span className="hint">{tgLinked ? "Telegram is connected" : "Connect Telegram below to use it"}</span>
+              </label>
+              <select id="channel" name="channel" className="input" defaultValue={tgLinked ? channel : "email"}>
+                <option value="email">Email</option>
+                <option value="telegram" disabled={!tgLinked}>Telegram</option>
+                <option value="both" disabled={!tgLinked}>Email and Telegram</option>
+              </select>
+            </div>
             <label className="check">
               <input type="checkbox" name="last_day_reminder" defaultChecked={r.last_day_reminder} />
               <span>
@@ -272,6 +315,28 @@ export default async function Settings({ searchParams }: { searchParams: Promise
             </Link>
           </div>
         </form>
+
+        {telegramReady() ? (
+          <section className="card section tg-card">
+            <div className="grow">
+              <h2>Telegram</h2>
+              <p className="small muted" style={{ marginTop: 6 }}>
+                {tgLinked
+                  ? "Connected. Digests, last-day reminders and listing-day notes arrive in Telegram too, as instant notifications."
+                  : "Get alerts as instant phone notifications. Tap connect, then press Start in Telegram. Takes 10 seconds."}
+              </p>
+            </div>
+            {tgLinked ? (
+              <form action={disconnectTelegram}>
+                <button className="btn ghost" type="submit">Disconnect</button>
+              </form>
+            ) : (
+              <form action={connectTelegram}>
+                <button className="btn primary" type="submit">Connect Telegram</button>
+              </form>
+            )}
+          </section>
+        ) : null}
 
         <section className="card section">
           <div className="card-head">

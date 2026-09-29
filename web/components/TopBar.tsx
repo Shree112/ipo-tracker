@@ -19,10 +19,11 @@ export default function TopBar({ viewer }: { viewer?: Viewer | null }) {
             Live IPOs
           </NavLink>
           <NavLink href="/track-record">Track record</NavLink>
+          {approved ? <NavLink href="/my-ipos">My IPOs</NavLink> : null}
           {approved ? <NavLink href="/settings">Alerts</NavLink> : null}
           {approved && viewer?.isAdmin ? (
-            <NavLink href="/admin">
-              Members
+            <NavLink href="/admin/dashboard" match="/admin">
+              Admin
               {viewer.pending ? <span className="nav-count">{viewer.pending}</span> : null}
             </NavLink>
           ) : null}
@@ -40,7 +41,8 @@ export default function TopBar({ viewer }: { viewer?: Viewer | null }) {
                 <span className="muted small">{viewer.email}</span>
               </div>
               {approved ? <Link href="/settings">Alert settings</Link> : null}
-              {viewer.isAdmin ? <Link href="/admin">Members</Link> : null}
+              {approved ? <Link href="/my-ipos">My IPOs</Link> : null}
+              {viewer.isAdmin ? <Link href="/admin/dashboard">Admin</Link> : null}
               <form action="/auth/signout" method="post">
                 <button type="submit">Sign out</button>
               </form>

@@ -100,9 +100,11 @@ def ingest_rhp(conn, issues) -> None:
             status, msg = "error", f"{type(exc).__name__}: {exc}"[:300]
         with conn.cursor() as cur:
             cur.execute("DELETE FROM rhp_chunk WHERE issue_id = %s", (i["id"],))
-            for n, c in enumerate(parts):
-                cur.execute("INSERT INTO rhp_chunk (issue_id, chunk_no, page, content) VALUES (%s, %s, %s, %s)",
-                            (i["id"], n, c["page"], c["content"].replace("\x00", "")))
+            # One COPY instead of one INSERT per chunk: the runner is in the US and the
+            # database in Singapore, so ~800 separate round trips per prospectus took minutes.
+            with cur.copy("COPY rhp_chunk (issue_id, chunk_no, page, content) FROM STDIN") as cp:
+                for n, c in enumerate(parts):
+                    cp.write_row((i["id"], n, c["page"], c["content"].replace("\x00", "")))
             cur.execute("""INSERT INTO rhp_doc (issue_id, url, pages, chunks, status, message, fetched_at)
                            VALUES (%s, %s, %s, %s, %s, %s, now())
                            ON CONFLICT (issue_id) DO UPDATE SET url = EXCLUDED.url, pages = EXCLUDED.pages,
@@ -169,6 +171,7 @@ def save_summary(conn, issue_id: int, h: str, n: int, summary, model: str | None
 
 
 def main() -> None:
+    sys.stdout.reconfigure(line_buffering=True)  # show progress live in the Actions log
     ap = argparse.ArgumentParser()
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--summarise", action="store_true")
@@ -194,6 +197,7 @@ def main() -> None:
             else:
                 need_model.append((i, comments, h))
         about_todo = pending_about(conn, issues, args.force)
+        conn.commit()  # end the read transaction before the slow model calls
         if args.fetch and not args.summarise:
             flag = "true" if need_model or about_todo else "false"
             print(f"needs_llm={flag} ({len(need_model)} comment summaries, {len(about_todo)} company profiles)")

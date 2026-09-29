@@ -33,7 +33,16 @@ def main() -> None:
     try:
         with db.connect() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql)
+                # Schema changes need a moment of exclusive access to each table.
+                # If a job is mid-run holding one, give up after 15s with a clear
+                # message rather than waiting silently.
+                cur.execute("SET lock_timeout = '15s'")
+                try:
+                    cur.execute(sql)
+                except psycopg.errors.LockNotAvailable:
+                    raise SystemExit(
+                        "\nA table is busy - most likely a GitHub job (chatter or the hourly refresh) is\n"
+                        "running right now. Wait for it to finish (Actions tab), then run this again.\n")
             print("schema applied\n")
 
             with conn.cursor() as cur:

@@ -5,6 +5,7 @@ import { backtest, pastIssues, stats } from "@/lib/history";
 import { PRESETS } from "@/lib/presets";
 import { describeRules, rulesFor } from "@/lib/queries";
 import { getViewer, requireApproved, viewerId } from "@/lib/viewer";
+import { logEvent } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Pick your alerts" };
@@ -15,11 +16,13 @@ async function choose(fd: FormData) {
   if (!v || v.status !== "approved") redirect("/signin");
   const id = String(fd.get("preset") ?? "");
   if (id === "keep") {
+    logEvent("preset", v.id, null, { preset: "keep" });
     await db()`UPDATE alert_rules SET onboarded_at = now() WHERE user_id = ${v.id}::uuid`;
     redirect("/");
   }
   const p = PRESETS.find((x) => x.id === id);
   if (!p) redirect("/welcome");
+  logEvent("preset", v.id, null, { preset: p.id });
   const r = p.rules;
   await db()`
     INSERT INTO alert_rules (user_id) VALUES (${v.id}::uuid) ON CONFLICT (user_id) DO NOTHING`;

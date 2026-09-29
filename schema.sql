@@ -533,9 +533,14 @@ ALTER TABLE user_issue_status ADD COLUMN IF NOT EXISTS allotment text
 ALTER TABLE user_issue_status ADD COLUMN IF NOT EXISTS allotment_at timestamptz;
 ALTER TABLE user_issue_status ADD COLUMN IF NOT EXISTS allotment_mailed_at timestamptz;
 ALTER TABLE user_issue_status ADD COLUMN IF NOT EXISTS listing_mailed_at timestamptz;
-ALTER TABLE user_digest_run DROP CONSTRAINT IF EXISTS user_digest_run_kind_check;
-ALTER TABLE user_digest_run ADD CONSTRAINT user_digest_run_kind_check
-  CHECK (kind IN ('daily', 'reminder', 'allotment', 'listing'));
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_digest_run_kind_check'
+                 AND pg_get_constraintdef(oid) LIKE '%listing%') THEN
+    ALTER TABLE user_digest_run DROP CONSTRAINT IF EXISTS user_digest_run_kind_check;
+    ALTER TABLE user_digest_run ADD CONSTRAINT user_digest_run_kind_check
+      CHECK (kind IN ('daily', 'reminder', 'allotment', 'listing'));
+  END IF;
+END $$;
 -- first sign-in: null until the member picks a starting set of rules
 ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS onboarded_at timestamptz;
 
@@ -576,8 +581,11 @@ CREATE TABLE IF NOT EXISTS health_alert (
 ALTER TABLE app_users ADD COLUMN IF NOT EXISTS telegram_chat_id bigint;
 ALTER TABLE app_users ADD COLUMN IF NOT EXISTS telegram_link_code text;
 ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS channel text NOT NULL DEFAULT 'email';
-ALTER TABLE alert_rules DROP CONSTRAINT IF EXISTS alert_rules_channel_check;
-ALTER TABLE alert_rules ADD CONSTRAINT alert_rules_channel_check CHECK (channel IN ('email', 'telegram', 'both'));
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'alert_rules_channel_check') THEN
+    ALTER TABLE alert_rules ADD CONSTRAINT alert_rules_channel_check CHECK (channel IN ('email', 'telegram', 'both'));
+  END IF;
+END $$;
 
 -- prospectus text, chunked for full-text search (kept while the issue is live)
 CREATE TABLE IF NOT EXISTS rhp_chunk (
@@ -609,7 +617,8 @@ CREATE TABLE IF NOT EXISTS rhp_doc (
 DO $$
 DECLARE t text;
 BEGIN
-  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+  -- only tables that don't have it yet, so a re-run doesn't lock every table
+  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND NOT rowsecurity LOOP
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
   END LOOP;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
