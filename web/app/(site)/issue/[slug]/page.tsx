@@ -70,7 +70,7 @@ function SubBars({ sub }: { sub: SubPoint }) {
 export default async function IssuePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const today = todayIST();
-  const uid = (await viewerId()) ?? "00000000-0000-0000-0000-000000000000";
+  const uid = await viewerId();
   const [viewer, data, allMatches, allRules] = await Promise.all([
     getViewer(),
     getIssue(slug, uid),

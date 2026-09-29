@@ -54,7 +54,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ w
   const today = todayIST();
   // the verified id comes from the middleware, so the data queries start
   // alongside the account check instead of after it
-  const uid = (await viewerId()) ?? "00000000-0000-0000-0000-000000000000";
+  const uid = await viewerId();
   const [viewer, issues, allMatches, rules] = await Promise.all([
     getViewer(),
     listIssues(uid),

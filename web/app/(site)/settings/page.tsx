@@ -109,7 +109,7 @@ function Threshold({
 export default async function Settings({ searchParams }: { searchParams: Promise<{ saved?: string }> }) {
   const { saved } = await searchParams;
   const today = todayIST();
-  const uid = (await viewerId()) ?? "00000000-0000-0000-0000-000000000000";
+  const uid = await viewerId();
   const [viewer, rules, matches] = await Promise.all([requireApproved(), rulesFor(uid), matchesFor(uid, today)]);
   const r: Rules = rules ?? {
     gmp_pct_min: 10,

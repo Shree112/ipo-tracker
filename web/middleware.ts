@@ -39,6 +39,9 @@ export async function middleware(req: NextRequest) {
     const key = process.env.SUPABASE_ANON_KEY;
     if (url && key) {
       const supabase = createServerClient(url, key, {
+        // never let a slow auth server hold the page: give up after 3.5s and
+        // treat the visitor as signed out for this one request
+        global: { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(3500) }) },
         cookies: {
           getAll: () => req.cookies.getAll(),
           setAll: (toSet, headers) => {
@@ -50,7 +53,7 @@ export async function middleware(req: NextRequest) {
           },
         },
       });
-      const { data } = await supabase.auth.getClaims();
+      const { data } = await supabase.auth.getClaims().catch(() => ({ data: null }));
       const c = data?.claims;
       if (c?.sub && c.email) {
         const meta = (c.user_metadata ?? {}) as Record<string, unknown>;

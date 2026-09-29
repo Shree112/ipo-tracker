@@ -12,7 +12,7 @@ export function db(): postgres.Sql {
   if (!url) throw new Error("DATABASE_URL is not set");
   globalForDb.sql = postgres(url, {
     prepare: false,
-    max: 3,
+    max: 5, // an issue page runs ~8 small queries at once; 3 made them queue
     idle_timeout: 20,
     connect_timeout: 15,
     // numeric -> JS number. Every numeric here is a price, a percentage or a

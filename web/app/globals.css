@@ -653,22 +653,21 @@ details.fold > .fold-body, details.fold[open] > *:not(summary) { animation: fold
 
 /* ----------------------------------------------------------------- motion */
 /* page entrance: each block rises into place, a beat apart */
-@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
-main.wrap > * { animation: rise 0.7s var(--ease) both; }
-main.wrap > *:nth-child(2) { animation-delay: 0.06s; }
-main.wrap > *:nth-child(3) { animation-delay: 0.12s; }
-main.wrap > *:nth-child(4) { animation-delay: 0.18s; }
-main.wrap > *:nth-child(5) { animation-delay: 0.24s; }
-main.wrap > *:nth-child(n + 6) { animation-delay: 0.3s; }
-.list-row { animation: rise 0.6s var(--ease) both; }
-.list-row:nth-child(2) { animation-delay: 0.04s; } .list-row:nth-child(3) { animation-delay: 0.08s; }
-.list-row:nth-child(4) { animation-delay: 0.12s; } .list-row:nth-child(5) { animation-delay: 0.16s; }
-.list-row:nth-child(6) { animation-delay: 0.2s; } .list-row:nth-child(n + 7) { animation-delay: 0.24s; }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+main.wrap > * { animation: rise 0.38s var(--ease) both; }
+main.wrap > *:nth-child(2) { animation-delay: 0.03s; }
+main.wrap > *:nth-child(3) { animation-delay: 0.06s; }
+main.wrap > *:nth-child(n + 4) { animation-delay: 0.09s; }
+.list-row { animation: rise 0.35s var(--ease) both; }
+.list-row:nth-child(2) { animation-delay: 0.02s; } .list-row:nth-child(3) { animation-delay: 0.04s; }
+.list-row:nth-child(n + 4) { animation-delay: 0.06s; }
+/* skeletons appear instantly; motion is only for real content */
+main[aria-busy="true"] > * { animation: none; }
 
 /* charts draw themselves in */
-.draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 1.4s var(--ease) 0.2s forwards; }
+.draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 0.8s var(--ease) 0.1s forwards; }
 @keyframes draw { to { stroke-dashoffset: 0; } }
-.bars .fill { transform-origin: left; animation: grow 0.9s var(--ease) both; }
+.bars .fill { transform-origin: left; animation: grow 0.6s var(--ease) both; }
 @keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
 /* hero: slow aurora + film grain behind the pitch */

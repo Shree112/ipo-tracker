@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import { db } from "./db";
 import { toISODate } from "./format";
 import type { Rules } from "./queries";
@@ -17,24 +18,24 @@ export type Past = {
   profit: number | null; // ₹ per lot implied by the GMP
 };
 
-let cache: { at: number; rows: Past[] } | null = null;
-
-export async function pastIssues(): Promise<Past[]> {
-  if (cache && Date.now() - cache.at < 3_600_000) return cache.rows;
-  const rows = await db()<(Omit<Past, "listing_date"> & { listing_date: Date })[]>`
-    SELECT i.id, i.slug, i.name, c.listing_date, c.predicted_gain_pct AS gmp, c.actual_gain_pct AS gain,
-           i.issue_size_cr AS size,
-           CASE WHEN i.price_band_high IS NOT NULL AND i.lot_size IS NOT NULL
-                THEN c.predicted_gain_pct / 100.0 * i.price_band_high * i.lot_size END AS profit
-    FROM calibration c JOIN issues i ON i.id = c.issue_id
-    WHERE c.phase = 't_minus_1' AND c.price_basis = 'open' AND i.board = 'mainboard'
-      AND c.predicted_gain_pct IS NOT NULL AND c.actual_gain_pct IS NOT NULL
-      AND c.listing_date >= DATE '2023-01-01'
-    ORDER BY c.listing_date DESC`;
-  const out = rows.map((r) => ({ ...r, id: Number(r.id), listing_date: toISODate(r.listing_date)! }));
-  cache = { at: Date.now(), rows: out };
-  return out;
-}
+// Changes only when an issue lists, so an hour in Next's data cache is plenty.
+export const pastIssues = unstable_cache(
+  async (): Promise<Past[]> => {
+    const rows = await db()<(Omit<Past, "listing_date"> & { listing_date: Date })[]>`
+      SELECT i.id, i.slug, i.name, c.listing_date, c.predicted_gain_pct AS gmp, c.actual_gain_pct AS gain,
+             i.issue_size_cr AS size,
+             CASE WHEN i.price_band_high IS NOT NULL AND i.lot_size IS NOT NULL
+                  THEN c.predicted_gain_pct / 100.0 * i.price_band_high * i.lot_size END AS profit
+      FROM calibration c JOIN issues i ON i.id = c.issue_id
+      WHERE c.phase = 't_minus_1' AND c.price_basis = 'open' AND i.board = 'mainboard'
+        AND c.predicted_gain_pct IS NOT NULL AND c.actual_gain_pct IS NOT NULL
+        AND c.listing_date >= DATE '2023-01-01'
+      ORDER BY c.listing_date DESC`;
+    return rows.map((r) => ({ ...r, id: Number(r.id), listing_date: toISODate(r.listing_date)! }));
+  },
+  ["past-issues-v1"],
+  { revalidate: 3600, tags: ["history"] },
+);
 
 export type Stats = { n: number; up: number; median: number | null; mean: number | null };
 

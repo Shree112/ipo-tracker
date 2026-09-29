@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import { db } from "./db";
 import { toISODate, todayIST } from "./format";
 
@@ -110,7 +111,7 @@ const ISSUE_COLUMNS = `
   i.price_band_low, i.price_band_high, i.lot_size, i.min_order_amount,
   i.issue_size_cr, i.fresh_issue_cr, i.ofs_cr, i.pe_ratio, i.exchanges,
   i.rhp_url, i.anchor_report_url, i.investorgain_url, i.ipowatch_url,
-  COALESCE(st.status, '-') AS status, st.note, st.allotment, i.registrar, i.allotment_date,
+  i.registrar, i.allotment_date,
   (SELECT json_agg(x) FROM (
      SELECT DISTINCT ON (source) source, gmp_pct, gmp_amount, observed_at
      FROM gmp_history g WHERE g.issue_id = i.id AND g.gmp_pct IS NOT NULL
@@ -143,99 +144,138 @@ function normalise(r: Record<string, unknown>): IssueRow {
   };
 }
 
-/** Everything worth seeing now: upcoming, open, awaiting listing, listed in the last week. */
-export async function listIssues(userId: string): Promise<IssueRow[]> {
-  const today = todayIST();
-  const rows = await db().unsafe(
-    `SELECT ${ISSUE_COLUMNS}
-     FROM issues i
-     LEFT JOIN user_issue_status st ON st.issue_id = i.id AND st.user_id = $2::uuid
-     LEFT JOIN listing_outcome lo ON lo.issue_id = i.id
-     WHERE i.board = 'mainboard' AND COALESCE(i.withdrawn, false) = false
-       AND i.open_date IS NOT NULL
-       AND i.open_date <= $1::date + 30
-       AND COALESCE(i.listing_date, i.close_date + 7) >= $1::date - 7
-     ORDER BY i.open_date, i.name`,
-    [today, userId],
+// ---------------------------------------------------------------- caching
+// Everything on the list and issue pages except the viewer's own marks is the
+// same for every visitor, and it only changes when the hourly job writes
+// (every few minutes on a closing day). So it's computed once a minute and
+// served from Next's data cache; each request then adds only the viewer's
+// own Applied/Skip/allotment marks, which is one tiny query.
+const FRESH_SECONDS = 60;
+const plain = <T,>(x: T): T => JSON.parse(JSON.stringify(x)); // same shape on cache hit and miss
+
+type Mark = { issue_id: number; status: string; note: string | null; allotment: IssueRow["allotment"] };
+
+async function marksFor(userId: string | null): Promise<Map<number, Mark>> {
+  if (!userId) return new Map();
+  const rows = await db()<Mark[]>`
+    SELECT issue_id, status, note, allotment FROM user_issue_status
+    WHERE user_id = ${userId}::uuid`.catch(
+    (e: { code?: string }) => {
+      // allotment arrives with a schema update
+      if (e?.code === "42703")
+        return db()<Mark[]>`SELECT issue_id, status, note, NULL AS allotment FROM user_issue_status WHERE user_id = ${userId}::uuid`;
+      throw e;
+    },
   );
-  return rows.map(normalise);
+  return new Map(rows.map((r) => [Number(r.issue_id), r]));
 }
 
-export async function getIssue(slug: string, userId: string) {
-  const sql = db();
-  // One round trip: every query keys on the slug, so none waits for another.
-  // (Before, the page made three sequential trips - and with the database in
-  // Singapore that latency was most of the load time.)
-  const bySlug = () => sql`(SELECT id FROM issues WHERE slug = ${slug})`;
-  const [rows, gmp, subs, snaps, details, bands, chatterRows] = await Promise.all([
-    sql.unsafe(
+function withMark(i: Omit<IssueRow, "status" | "note" | "allotment">, m: Mark | undefined): IssueRow {
+  return { ...i, status: m?.status ?? "-", note: m?.note ?? null, allotment: m?.allotment ?? null };
+}
+
+const cachedList = unstable_cache(
+  async (today: string) => {
+    const rows = await db().unsafe(
       `SELECT ${ISSUE_COLUMNS}
        FROM issues i
-       LEFT JOIN user_issue_status st ON st.issue_id = i.id AND st.user_id = $2::uuid
        LEFT JOIN listing_outcome lo ON lo.issue_id = i.id
-       WHERE i.slug = $1`,
-      [slug, userId],
-    ),
-    sql<GmpPoint[]>`
-      SELECT source, observed_at, gmp_amount, gmp_pct, capture_mode
-      FROM gmp_history
-      WHERE issue_id = ${bySlug()} AND gmp_pct IS NOT NULL
-      ORDER BY observed_at`,
-    sql<SubPoint[]>`
-      SELECT observed_at, qib_x, nii_x, shni_x, bhni_x, rii_x, employee_x, total_x
-      FROM subscription WHERE issue_id = ${bySlug()}
-      ORDER BY observed_at`,
-    sql<{ phase: string; gmp_pct: number | null; sub_total_x: number | null; sub_rii_x: number | null; taken_at: Date; extras: Record<string, unknown> | null }[]>`
-      SELECT phase, gmp_pct, sub_total_x, sub_rii_x, taken_at, extras
-      FROM signal_snapshot WHERE issue_id = ${bySlug()} ORDER BY phase DESC`,
-    // issue_detail arrives with a schema update; until the Python side has
-    // applied it, render the page without the research sections instead of
-    // failing the whole page.
-    sql<IssueDetail[]>`
-      SELECT anchor, anchor_summary, anchor_lockin_30, anchor_lockin_90,
-             financials, peers, objects, kpis, about, about_summary, updated_at
-      FROM issue_detail WHERE issue_id = ${bySlug()}`.catch((e: { code?: string }) => {
-      if (e?.code === "42P01") return [] as IssueDetail[];
-      // before the "about" columns exist: the rest of the research still shows
-      if (e?.code === "42703")
-        return sql<IssueDetail[]>`
-          SELECT anchor, anchor_summary, anchor_lockin_30, anchor_lockin_90,
-                 financials, peers, objects, kpis, NULL AS about, NULL AS about_summary, updated_at
-          FROM issue_detail WHERE issue_id = ${bySlug()}`.catch(() => [] as IssueDetail[]);
-      throw e;
-    }),
-    baseRates(),
-    // comment summaries arrive with a schema update too; same fallback
-    sql<Chatter[]>`
-      SELECT s.summary, s.n_comments, s.summarized_at,
-             (SELECT json_agg(json_build_object('source', c.source, 'status', c.status, 'n', c.n_comments,
-                                                'threads', c.threads, 'fetched_at', c.fetched_at) ORDER BY c.source)
-              FROM issue_chatter c WHERE c.issue_id = i.id) AS sources
-      FROM issues i LEFT JOIN issue_chatter_summary s ON s.issue_id = i.id
-      WHERE i.slug = ${slug}`.catch((e: { code?: string }) => {
-      if (e?.code === "42P01" || e?.code === "42703") return [] as Chatter[];
-      throw e;
-    }),
-  ]);
-  if (!rows.length) return null;
-  const issue = normalise(rows[0]);
-  const detail = details[0]
-    ? {
-        ...details[0],
-        anchor_lockin_30: toISODate(details[0].anchor_lockin_30 as unknown as Date),
-        anchor_lockin_90: toISODate(details[0].anchor_lockin_90 as unknown as Date),
-      }
-    : null;
+       WHERE i.board = 'mainboard' AND COALESCE(i.withdrawn, false) = false
+         AND i.open_date IS NOT NULL
+         AND i.open_date <= $1::date + 30
+         AND COALESCE(i.listing_date, i.close_date + 7) >= $1::date - 7
+       ORDER BY i.open_date, i.name`,
+      [today],
+    );
+    return plain(rows.map(normalise));
+  },
+  ["issues-list-v2"],
+  { revalidate: FRESH_SECONDS, tags: ["issues"] },
+);
 
-  // History for context: how issues with a similar day-before GMP opened.
-  const refGmp =
-    snaps.find((s) => s.phase === "t_minus_1")?.gmp_pct ??
-    (issue.gmp_latest?.find((g) => g.source === "investorgain") ?? issue.gmp_latest?.[0])?.gmp_pct ??
-    null;
-  const history = refGmp === null ? null : pickBand(bands, refGmp);
+/** Everything worth seeing now: upcoming, open, awaiting listing, listed in the last week. */
+export async function listIssues(userId: string | null): Promise<IssueRow[]> {
+  const [rows, marks] = await Promise.all([cachedList(todayIST()), marksFor(userId)]);
+  return rows.map((r) => withMark(r, marks.get(r.id)));
+}
 
-  const chatter: Chatter | null = chatterRows[0] ?? null;
-  return { issue, gmp: [...gmp], subs: [...subs], snaps: [...snaps], history, refGmp, detail, chatter };
+const cachedIssue = unstable_cache(
+  async (slug: string) => {
+    const sql = db();
+    // one round trip: every query keys on the slug, so none waits for another
+    const bySlug = () => sql`(SELECT id FROM issues WHERE slug = ${slug})`;
+    const [rows, gmp, subs, snaps, details, bands, chatterRows] = await Promise.all([
+      sql.unsafe(
+        `SELECT ${ISSUE_COLUMNS}
+         FROM issues i
+         LEFT JOIN listing_outcome lo ON lo.issue_id = i.id
+         WHERE i.slug = $1`,
+        [slug],
+      ),
+      sql<GmpPoint[]>`
+        SELECT source, observed_at, gmp_amount, gmp_pct, capture_mode
+        FROM gmp_history
+        WHERE issue_id = ${bySlug()} AND gmp_pct IS NOT NULL
+        ORDER BY observed_at`,
+      sql<SubPoint[]>`
+        SELECT observed_at, qib_x, nii_x, shni_x, bhni_x, rii_x, employee_x, total_x
+        FROM subscription WHERE issue_id = ${bySlug()}
+        ORDER BY observed_at`,
+      sql<{ phase: string; gmp_pct: number | null; sub_total_x: number | null; sub_rii_x: number | null; taken_at: Date; extras: Record<string, unknown> | null }[]>`
+        SELECT phase, gmp_pct, sub_total_x, sub_rii_x, taken_at, extras
+        FROM signal_snapshot WHERE issue_id = ${bySlug()} ORDER BY phase DESC`,
+      // research and comment summaries arrive with schema updates; until the
+      // Python side has applied them, the page renders without those sections
+      sql<IssueDetail[]>`
+        SELECT anchor, anchor_summary, anchor_lockin_30, anchor_lockin_90,
+               financials, peers, objects, kpis, about, about_summary, updated_at
+        FROM issue_detail WHERE issue_id = ${bySlug()}`.catch((e: { code?: string }) => {
+        if (e?.code === "42P01") return [] as IssueDetail[];
+        if (e?.code === "42703")
+          return sql<IssueDetail[]>`
+            SELECT anchor, anchor_summary, anchor_lockin_30, anchor_lockin_90,
+                   financials, peers, objects, kpis, NULL AS about, NULL AS about_summary, updated_at
+            FROM issue_detail WHERE issue_id = ${bySlug()}`.catch(() => [] as IssueDetail[]);
+        throw e;
+      }),
+      baseRates(),
+      sql<Chatter[]>`
+        SELECT s.summary, s.n_comments, s.summarized_at,
+               (SELECT json_agg(json_build_object('source', c.source, 'status', c.status, 'n', c.n_comments,
+                                                  'threads', c.threads, 'fetched_at', c.fetched_at) ORDER BY c.source)
+                FROM issue_chatter c WHERE c.issue_id = i.id) AS sources
+        FROM issues i LEFT JOIN issue_chatter_summary s ON s.issue_id = i.id
+        WHERE i.slug = ${slug}`.catch((e: { code?: string }) => {
+        if (e?.code === "42P01" || e?.code === "42703") return [] as Chatter[];
+        throw e;
+      }),
+    ]);
+    if (!rows.length) return null;
+    const issue = normalise(rows[0]);
+    const detail = details[0]
+      ? {
+          ...details[0],
+          anchor_lockin_30: toISODate(details[0].anchor_lockin_30 as unknown as Date),
+          anchor_lockin_90: toISODate(details[0].anchor_lockin_90 as unknown as Date),
+        }
+      : null;
+    // history for context: how issues with a similar day-before GMP opened
+    const refGmp =
+      snaps.find((x) => x.phase === "t_minus_1")?.gmp_pct ??
+      (issue.gmp_latest?.find((g) => g.source === "investorgain") ?? issue.gmp_latest?.[0])?.gmp_pct ??
+      null;
+    const history = refGmp === null ? null : pickBand(bands, refGmp);
+    const chatter: Chatter | null = chatterRows[0] ?? null;
+    return plain({ issue, gmp: [...gmp], subs: [...subs], snaps: [...snaps], history, refGmp, detail, chatter });
+  },
+  ["issue-v2"],
+  { revalidate: FRESH_SECONDS, tags: ["issues"] },
+);
+
+export async function getIssue(slug: string, userId: string | null) {
+  const [data, marks] = await Promise.all([cachedIssue(slug), marksFor(userId)]);
+  if (!data) return null;
+  return { ...data, issue: withMark(data.issue, marks.get(data.issue.id)) };
 }
 
 const BANDS: [number, number, string][] = [
@@ -317,7 +357,8 @@ export type Match = { reasons: string[]; sticky: boolean; slug?: string; name?: 
 /** The viewer's radar: which issues match their alert rules today. Comes from
  *  the same SQL function the digest uses, so the site and the email agree.
  *  Slug and name come along so the Alerts page needs no second query. */
-export async function matchesFor(userId: string, today = todayIST()): Promise<Map<number, Match>> {
+export async function matchesFor(userId: string | null, today = todayIST()): Promise<Map<number, Match>> {
+  if (!userId) return new Map(); // signed out: no radar, and no need to run the rules for everyone
   const rows = await db()<{ issue_id: number; reasons: string[]; sticky: boolean; slug: string; name: string }[]>`
     SELECT m.issue_id, m.reasons, m.sticky, i.slug, i.name
     FROM user_matches(${today}::date) m JOIN issues i ON i.id = m.issue_id
@@ -357,7 +398,8 @@ export const RULE_KEYS = [
   "size_max_cr",
 ] as const;
 
-export async function rulesFor(userId: string): Promise<Rules | null> {
+export async function rulesFor(userId: string | null): Promise<Rules | null> {
+  if (!userId) return null;
   const [r] = await db()<Rules[]>`
     SELECT gmp_pct_min, profit_per_lot_min, sub_total_min, sub_retail_min, sub_qib_min, anchor_mf_min,
            size_min_cr, size_max_cr, match_mode, digest_hour, digest_days, start_at, last_day_reminder,

@@ -37,7 +37,7 @@ async function choose(fd: FormData) {
 const pct = (x: number | null) => (x === null ? "–" : `${x >= 0 ? "+" : ""}${x.toFixed(1)}%`);
 
 export default async function Welcome() {
-  const uid = (await viewerId()) ?? "00000000-0000-0000-0000-000000000000";
+  const uid = await viewerId();
   const [viewer, rules, past] = await Promise.all([requireApproved(), rulesFor(uid), pastIssues()]);
   const all = stats(past);
   const first = viewer.name?.split(" ")[0];
