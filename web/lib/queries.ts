@@ -1,5 +1,5 @@
 import { unstable_cache } from "next/cache";
-import { db } from "./db";
+import { db, within } from "./db";
 import { toISODate, todayIST } from "./format";
 
 export type GmpPoint = {
@@ -195,7 +195,7 @@ const cachedList = unstable_cache(
 
 /** Everything worth seeing now: upcoming, open, awaiting listing, listed in the last week. */
 export async function listIssues(userId: string | null): Promise<IssueRow[]> {
-  const [rows, marks] = await Promise.all([cachedList(todayIST()), marksFor(userId)]);
+  const [rows, marks] = await within(Promise.all([cachedList(todayIST()), marksFor(userId)]), 9000, "live IPO list");
   return rows.map((r) => withMark(r, marks.get(r.id)));
 }
 
@@ -273,7 +273,7 @@ const cachedIssue = unstable_cache(
 );
 
 export async function getIssue(slug: string, userId: string | null) {
-  const [data, marks] = await Promise.all([cachedIssue(slug), marksFor(userId)]);
+  const [data, marks] = await within(Promise.all([cachedIssue(slug), marksFor(userId)]), 9000, "issue page");
   if (!data) return null;
   return { ...data, issue: withMark(data.issue, marks.get(data.issue.id)) };
 }
@@ -359,10 +359,14 @@ export type Match = { reasons: string[]; sticky: boolean; slug?: string; name?: 
  *  Slug and name come along so the Alerts page needs no second query. */
 export async function matchesFor(userId: string | null, today = todayIST()): Promise<Map<number, Match>> {
   if (!userId) return new Map(); // signed out: no radar, and no need to run the rules for everyone
-  const rows = await db()<{ issue_id: number; reasons: string[]; sticky: boolean; slug: string; name: string }[]>`
-    SELECT m.issue_id, m.reasons, m.sticky, i.slug, i.name
-    FROM user_matches(${today}::date) m JOIN issues i ON i.id = m.issue_id
-    WHERE m.user_id = ${userId}::uuid`;
+  const rows = await within(
+    db()<{ issue_id: number; reasons: string[]; sticky: boolean; slug: string; name: string }[]>`
+      SELECT m.issue_id, m.reasons, m.sticky, i.slug, i.name
+      FROM user_matches(${today}::date) m JOIN issues i ON i.id = m.issue_id
+      WHERE m.user_id = ${userId}::uuid`,
+    9000,
+    "alert matches",
+  );
   return new Map(
     rows.map((r) => [Number(r.issue_id), { reasons: r.reasons ?? [], sticky: r.sticky, slug: r.slug, name: r.name }]),
   );
@@ -400,7 +404,7 @@ export const RULE_KEYS = [
 
 export async function rulesFor(userId: string | null): Promise<Rules | null> {
   if (!userId) return null;
-  const [r] = await db()<Rules[]>`
+  const [r] = await within(db()<Rules[]>`
     SELECT gmp_pct_min, profit_per_lot_min, sub_total_min, sub_retail_min, sub_qib_min, anchor_mf_min,
            size_min_cr, size_max_cr, match_mode, digest_hour, digest_days, start_at, last_day_reminder,
            email_to, paused, onboarded_at
@@ -412,7 +416,7 @@ export async function rulesFor(userId: string | null): Promise<Rules | null> {
              email_to, paused, now() AS onboarded_at
       FROM alert_rules WHERE user_id = ${userId}::uuid`;
     throw e;
-  });
+  }), 9000, "alert rules");
   return r ?? null;
 }
 

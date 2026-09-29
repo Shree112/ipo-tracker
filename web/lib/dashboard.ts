@@ -1,4 +1,4 @@
-import { db } from "./db";
+import { db, within } from "./db";
 
 // Everything the admin dashboard shows, in one parallel batch of small
 // queries. Tables that arrive with later schema updates fall back to empty.
@@ -29,7 +29,7 @@ export async function dashboardData() {
     failures,
     chatter,
     rhpDocs,
-  ] = await Promise.all([
+  ] = await within(Promise.all([
     sql<{ status: string; n: number }[]>`SELECT status, count(*)::int AS n FROM app_users GROUP BY status`,
     sql<{ week: string; n: number }[]>`
       SELECT to_char(date_trunc('week', created_at AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD') AS week, count(*)::int AS n
@@ -125,7 +125,7 @@ export async function dashboardData() {
       [{ last: null, summaries: 0, profiles: 0 }],
     ),
     safe(sql<{ status: string; n: number }[]>`SELECT status, count(*)::int AS n FROM rhp_doc GROUP BY status`, []),
-  ]);
+  ]), 15000, "dashboard");
 
   return {
     members, weekly, approveHours: approveHours[0]?.h ?? null, presets, actives: actives[0], dailyActive,

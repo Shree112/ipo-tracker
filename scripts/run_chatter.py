@@ -87,6 +87,7 @@ def ingest_rhp(conn, issues) -> None:
         with conn.cursor() as cur:
             cur.execute("SELECT url, status FROM rhp_doc WHERE issue_id = %s", (i["id"],))
             row = cur.fetchone()
+        conn.commit()  # don't sit in an open transaction through a minutes-long download
         if row and row["url"] == i["rhp_url"] and row["status"] in ("ok", "blocked", "too_big"):
             continue
         status, msg, pages, parts = "ok", None, None, []

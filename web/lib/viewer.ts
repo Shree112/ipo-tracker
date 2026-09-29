@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { db } from "./db";
+import { db, within } from "./db";
 import { recordVisit } from "./events";
 
 // Who is looking at the page. The middleware has already verified the
@@ -72,11 +72,11 @@ export const getViewer = cache(async (): Promise<Viewer | null> => {
     SELECT u.email, u.name, u.status, u.is_admin,
            CASE WHEN u.is_admin THEN (SELECT count(*)::int FROM app_users WHERE status = 'pending') ELSE 0 END AS pending
     FROM app_users u WHERE u.user_id = ${v.id}::uuid`;
-  let [row] = await load();
+  let [row] = await within(load(), 8000, "account");
   if (!row) {
     // signed in, but no account row (e.g. the callback's write failed)
-    await ensureAccount(v.id, v.email, v.name);
-    [row] = await load();
+    await within(ensureAccount(v.id, v.email, v.name), 8000, "account");
+    [row] = await within(load(), 8000, "account");
   }
   if (row.status === "approved") recordVisit(v.id);
   return { id: v.id, email: row.email, name: row.name, status: row.status, isAdmin: row.is_admin, pending: row.pending };

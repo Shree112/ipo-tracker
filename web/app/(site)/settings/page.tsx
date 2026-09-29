@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { db } from "@/lib/db";
+import { db, within } from "@/lib/db";
 import { todayIST } from "@/lib/format";
 import { describeRules, matchesFor, rulesFor, type Rules } from "@/lib/queries";
 import { getViewer, requireApproved, viewerId } from "@/lib/viewer";
@@ -131,7 +131,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   const { saved } = await searchParams;
   const today = todayIST();
   const uid = await viewerId();
-  const [viewer, rules, matches, tgRow] = await Promise.all([
+  const [viewer, rules, matches, tgRow] = await within(Promise.all([
     requireApproved(),
     rulesFor(uid),
     matchesFor(uid, today),
@@ -140,7 +140,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           SELECT u.telegram_chat_id::text AS chat, r.channel FROM app_users u LEFT JOIN alert_rules r ON r.user_id = u.user_id
           WHERE u.user_id = ${uid}::uuid`.catch(() => [])
       : Promise.resolve([]),
-  ]);
+  ]), 9000, "alert settings");
   const tgLinked = Boolean(tgRow[0]?.chat);
   const channel = tgRow[0]?.channel ?? "email";
   const r: Rules = rules ?? {

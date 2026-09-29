@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { db, within } from "@/lib/db";
 import { fmtDate, toISODate } from "@/lib/format";
 import { requireApproved, viewerId } from "@/lib/viewer";
 
@@ -26,7 +26,7 @@ const rs = (x: number | null) =>
 
 export default async function MyIpos() {
   const uid = await viewerId();
-  const [viewer, raw] = await Promise.all([
+  const [viewer, raw] = await within(Promise.all([
     requireApproved(),
     uid
       ? db()<(Omit<Row, "close_date" | "listing_date"> & { close_date: Date | null; listing_date: Date | null })[]>`
@@ -37,7 +37,7 @@ export default async function MyIpos() {
           WHERE st.user_id = ${uid}::uuid AND st.status IN ('applied', 'skipped')
           ORDER BY COALESCE(i.listing_date, i.close_date) DESC NULLS LAST`.catch(() => [])
       : Promise.resolve([]),
-  ]);
+  ]), 9000, "My IPOs");
   const rows: Row[] = raw.map((r) => ({ ...r, close_date: toISODate(r.close_date), listing_date: toISODate(r.listing_date) }));
   const perLot = (r: Row) => (r.open_price !== null && r.price !== null && r.lot ? (r.open_price - r.price) * r.lot : null);
 

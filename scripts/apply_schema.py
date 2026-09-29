@@ -1,11 +1,16 @@
 """Apply schema.sql to the Supabase Postgres database.
 
-Idempotent - safe to re-run after editing the schema.
+Idempotent - safe to re-run after editing the schema. The GitHub jobs run
+this before they start; when schema.sql hasn't changed since the last apply it
+does nothing, because applying takes brief exclusive locks on the tables and
+every page of the site would queue behind them.
 
-    python scripts/apply_schema.py
+    python scripts/apply_schema.py            # apply if schema.sql changed
+    python scripts/apply_schema.py --force    # apply anyway
 """
 from __future__ import annotations
 
+import hashlib
 import sys
 from pathlib import Path
 
@@ -29,21 +34,36 @@ EXPECTED = [
 
 def main() -> None:
     sql = (config.ROOT / "schema.sql").read_text(encoding="utf-8")
+    digest = hashlib.sha256(sql.replace("\r\n", "\n").encode()).hexdigest()[:16]
+    force = "--force" in sys.argv
 
     try:
         with db.connect() as conn:
             with conn.cursor() as cur:
-                # Schema changes need a moment of exclusive access to each table.
-                # If a job is mid-run holding one, give up after 15s with a clear
-                # message rather than waiting silently.
-                cur.execute("SET lock_timeout = '15s'")
+                cur.execute("SELECT to_regclass('public.schema_meta') IS NOT NULL AS ok")
+                if cur.fetchone()["ok"]:
+                    cur.execute("SELECT value FROM schema_meta WHERE key = 'schema_sha'")
+                    row = cur.fetchone()
+                    if row and row["value"] == digest and not force:
+                        print(f"schema unchanged ({digest}) - nothing to apply")
+                        return
+            conn.commit()
+            with conn.cursor() as cur:
+                # Schema changes need a moment of exclusive access to each table,
+                # and while this waits, the site's reads queue behind it. So if a
+                # job is holding a table, give up quickly with a clear message.
+                cur.execute("SET LOCAL lock_timeout = '5s'")
                 try:
                     cur.execute(sql)
                 except psycopg.errors.LockNotAvailable:
                     raise SystemExit(
                         "\nA table is busy - most likely a GitHub job (chatter or the hourly refresh) is\n"
                         "running right now. Wait for it to finish (Actions tab), then run this again.\n")
-            print("schema applied\n")
+                cur.execute("""INSERT INTO schema_meta (key, value) VALUES ('schema_sha', %s)
+                               ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
+                            (digest,))
+            conn.commit()
+            print(f"schema applied ({digest})\n")
 
             with conn.cursor() as cur:
                 cur.execute(

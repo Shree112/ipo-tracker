@@ -1,4 +1,4 @@
-import { db } from "./db";
+import { db, within } from "./db";
 
 // "Ask the prospectus": find the few RHP passages that match the question
 // (Postgres full-text search over chunks the chatter job loaded), then have an
@@ -40,8 +40,12 @@ export async function retrieve(slug: string, question: string): Promise<Excerpt[
 }
 
 export async function prospectusStatus(slug: string): Promise<{ status: string; pages: number | null } | null> {
-  const [r] = await db()<{ status: string; pages: number | null }[]>`
-    SELECT d.status, d.pages FROM rhp_doc d JOIN issues i ON i.id = d.issue_id WHERE i.slug = ${slug}`.catch(() => []);
+  const [r] = await within(
+    db()<{ status: string; pages: number | null }[]>`
+      SELECT d.status, d.pages FROM rhp_doc d JOIN issues i ON i.id = d.issue_id WHERE i.slug = ${slug}`,
+    6000,
+    "prospectus status",
+  ).catch(() => []);
   return r ?? null;
 }
 

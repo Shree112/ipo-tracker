@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import AdminTabs from "@/components/AdminTabs";
 import { revalidatePath } from "next/cache";
-import { db } from "@/lib/db";
+import { db, within } from "@/lib/db";
 import { fmtDate } from "@/lib/format";
 import { getViewer, maxUsers, requireAdmin } from "@/lib/viewer";
 
@@ -70,7 +70,7 @@ function Row({ m, actions }: { m: Member; actions: [string, string, string][] })
 
 export default async function Admin({ searchParams }: { searchParams: Promise<{ full?: string }> }) {
   const { full } = await searchParams;
-  const [viewer, members] = await Promise.all([
+  const [viewer, members] = await within(Promise.all([
     requireAdmin(),
     db()<Member[]>`
       SELECT u.user_id::text AS user_id, u.email, u.name, u.status, u.is_admin, u.created_at, u.last_seen_at,
@@ -84,7 +84,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
                  CASE WHEN r.paused THEN 'paused' END) END AS rules
       FROM app_users u LEFT JOIN alert_rules r ON r.user_id = u.user_id
       ORDER BY u.created_at`,
-  ]);
+  ]), 9000, "members");
   const pending = members.filter((m) => m.status === "pending");
   const approved = members.filter((m) => m.status === "approved");
   const rejected = members.filter((m) => m.status === "rejected");

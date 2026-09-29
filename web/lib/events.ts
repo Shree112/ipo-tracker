@@ -1,5 +1,5 @@
 import { after } from "next/server";
-import { db } from "./db";
+import { db, within } from "./db";
 
 // Usage events for the admin dashboard. Written after the response has been
 // sent (next/server `after`), so they never slow a page or a tap down, and a
@@ -15,18 +15,22 @@ export type EventKind =
 
 export function logEvent(kind: EventKind, userId: string | null, issueSlug?: string | null, meta?: Record<string, unknown>) {
   after(async () => {
-    await db()`
+    await within(db()`
       INSERT INTO app_event (kind, user_id, issue_id, meta)
       VALUES (${kind}, ${userId}::uuid,
               ${issueSlug ? db()`(SELECT id FROM issues WHERE slug = ${issueSlug})` : null},
-              ${meta ? db().json(meta as never) : null})`.catch(() => undefined);
+              ${meta ? db().json(meta as never) : null})`, 5000, "event").catch(() => undefined);
   });
 }
 
 /** One row per member per day they open the site - daily/weekly actives. */
 export function recordVisit(userId: string) {
   after(async () => {
-    await db()`INSERT INTO app_visit (user_id, day) VALUES (${userId}::uuid, (now() AT TIME ZONE 'Asia/Kolkata')::date)
-               ON CONFLICT DO NOTHING`.catch(() => undefined);
+    await within(
+      db()`INSERT INTO app_visit (user_id, day) VALUES (${userId}::uuid, (now() AT TIME ZONE 'Asia/Kolkata')::date)
+           ON CONFLICT DO NOTHING`,
+      5000,
+      "visit",
+    ).catch(() => undefined);
   });
 }

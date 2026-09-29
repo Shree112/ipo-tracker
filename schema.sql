@@ -607,6 +607,14 @@ CREATE TABLE IF NOT EXISTS rhp_doc (
   fetched_at  timestamptz NOT NULL DEFAULT now()
 );
 
+-- Which version of this file was last applied (scripts/apply_schema.py skips
+-- the run when nothing changed, so scheduled jobs don't take table locks).
+CREATE TABLE IF NOT EXISTS schema_meta (
+  key         text PRIMARY KEY,
+  value       text NOT NULL,
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
 -- Lock the database away from Supabase's public API. Signing in with Google
 -- means the project's anon key sits with the website, and that key can call
 -- the auto-generated REST API for anything in the public schema that RLS
