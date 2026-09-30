@@ -37,6 +37,13 @@ import RefreshSubscription from "@/components/RefreshSubscription";
 export const dynamic = "force-dynamic";
 
 const LABEL: Record<string, string> = { investorgain: "InvestorGain", ipowatch: "IPO Watch" };
+const LOT_LABEL: Record<string, [string, string]> = {
+  "Retail (min)": ["Retail", "smallest bid"],
+  "Retail (max)": ["Retail", "largest bid"],
+  "Small HNI (min)": ["Small HNI", "smallest bid"],
+  "Small HNI (max)": ["Small HNI", "largest bid"],
+  "Big HNI (min)": ["Big HNI", "smallest bid"],
+};
 const IST_MS = 5.5 * 3_600_000;
 const istMidnight = (iso: string) => Date.parse(`${iso}T00:00:00Z`) - IST_MS;
 
@@ -296,25 +303,43 @@ export default async function IssuePage({
         </div>
 
         {lots.length ? (
-          <section className="card section" id="lots">
-            <div className="card-head">
-              <h2>How much to apply</h2>
-              <span className="sub">at the upper band, {rupees(i.price_band_high)} a share</span>
-            </div>
+          <Fold
+            id="lots"
+            title="How much to apply"
+            summary={
+              <>
+                <span className="chip">
+                  1 lot <b>{rupees(lots[0].amount, 0)}</b>
+                </span>
+                {lots.find((l) => l.category === "Retail (max)") ? (
+                  <span className="chip">
+                    retail up to <b>{rupees(lots.find((l) => l.category === "Retail (max)")!.amount, 0)}</b>
+                  </span>
+                ) : null}
+              </>
+            }
+          >
+            <p className="small muted" style={{ marginBottom: 12 }}>
+              The smallest and largest bid for each type of investor, at the upper price of {rupees(i.price_band_high)} a
+              share.
+            </p>
             <div className="table-wrap">
               <table className="lots">
                 <thead>
                   <tr>
-                    <th>Category</th>
+                    <th>Investor type</th>
                     <th className="r">Lots</th>
                     <th className="r">Shares</th>
-                    <th className="r">Amount</th>
+                    <th className="r">You pay</th>
                   </tr>
                 </thead>
                 <tbody>
                   {lots.map((l) => (
                     <tr key={l.category}>
-                      <td>{l.category}</td>
+                      <td>
+                        <div>{LOT_LABEL[l.category]?.[0] ?? l.category}</div>
+                        <div className="xs muted">{LOT_LABEL[l.category]?.[1]}</div>
+                      </td>
                       <td className="r">{l.lots}</td>
                       <td className="r">{l.shares.toLocaleString("en-IN")}</td>
                       <td className="r">{rupees(l.amount, 0)}</td>
@@ -323,10 +348,18 @@ export default async function IssuePage({
                 </tbody>
               </table>
             </div>
-            <p className="xs muted" style={{ marginTop: 8 }}>
-              Retail bids up to ₹2 lakh, small HNI above ₹2 lakh up to ₹10 lakh, big HNI above ₹10 lakh.
-            </p>
-          </section>
+            <ul className="xs muted lots-key">
+              <li>
+                <b>Retail</b>: individuals bidding up to ₹2 lakh.
+              </li>
+              <li>
+                <b>Small HNI</b> (sNII): above ₹2 lakh, up to ₹10 lakh.
+              </li>
+              <li>
+                <b>Big HNI</b> (bNII): above ₹10 lakh.
+              </li>
+            </ul>
+          </Fold>
         ) : null}
 
         <AboutCompany detail={detail} shortName={shortName} sourceUrl={i.investorgain_url} />

@@ -802,4 +802,5 @@ p.preset-stats { display: block; }
 .spin { animation: spin 0.8s linear infinite; transform-origin: 50% 50%; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
-table.lots td:first-child { white-space: nowrap; }
+@media (max-width: 480px) { table.lots th, table.lots td { padding-left: 6px; padding-right: 6px; } }
+.lots-key { margin: 10px 0 0; padding-left: 18px; display: grid; gap: 2px; }
