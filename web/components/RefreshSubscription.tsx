@@ -6,7 +6,7 @@ import { refreshSubscriptionNow } from "@/app/(site)/issue/[slug]/actions";
 
 // "Refresh" on the Subscription card: pulls the live numbers now instead of
 // waiting for the 10-minute update, then re-renders the card.
-export default function RefreshSubscription({ slug, checked }: { slug: string; checked: string | null }) {
+export default function RefreshSubscription({ slug, unchangedSince }: { slug: string; unchangedSince: string | null }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [note, setNote] = useState<string | null>(null);
@@ -38,7 +38,7 @@ export default function RefreshSubscription({ slug, checked }: { slug: string; c
         {pending ? "Checking…" : "Refresh"}
       </button>
       <span className="xs muted" aria-live="polite">
-        {note ?? (checked ? `checked ${checked}` : "")}
+        {note ?? (unchangedSince ? `Numbers unchanged since ${unchangedSince}` : "")}
       </span>
     </div>
   );

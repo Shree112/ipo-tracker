@@ -136,6 +136,13 @@ export default async function IssuePage({
   // bidding is live (or closed yesterday: the final numbers can still land the next morning)
   const subLive = !!i.open_date && !!i.close_date && i.open_date <= today && today <= addDays(i.close_date, 1);
   const lots = lotTable(i.lot_size, i.price_band_high);
+  // While bidding is live, the card's time is when we last checked the source,
+  // not when the numbers last moved - a check that finds no change still counts.
+  const checkedAt = subLive && subChecked ? new Date(subChecked) : null;
+  const subAt = sub ? new Date(sub.observed_at) : null;
+  const freshAt = checkedAt && subAt && checkedAt > subAt ? checkedAt : subAt;
+  const unchangedSince =
+    checkedAt && subAt && checkedAt.getTime() - subAt.getTime() > 5 * 60_000 ? fmtWhen(subAt, today) : null;
 
 
   const steps: [string, string | null][] = [
@@ -386,10 +393,14 @@ export default async function IssuePage({
           <section className="card" id="subscription">
             <div className="card-head">
               <h2>Subscription</h2>
-              {sub ? <span className="sub">as of {fmtWhen(sub.observed_at, today)}</span> : null}
+              {sub && freshAt ? (
+                <span className="sub">
+                  {checkedAt ? "updated" : "as of"} {fmtWhen(freshAt, today)}
+                </span>
+              ) : null}
             </div>
             {member && subLive ? (
-              <RefreshSubscription slug={i.slug} checked={subChecked ? fmtWhen(subChecked, today) : null} />
+              <RefreshSubscription slug={i.slug} unchangedSince={unchangedSince} />
             ) : null}
             {sub ? (
               <>

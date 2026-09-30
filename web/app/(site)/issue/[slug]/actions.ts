@@ -69,6 +69,6 @@ export async function refreshSubscriptionNow(slug: string): Promise<RefreshSubRe
   revalidatePath(`/issue/${slug}`);
   if (r.status === "error") return { ok: false, message: "Couldn't reach the source just now - try again in a minute." };
   if (r.status === "updated") return { ok: true, message: "New numbers loaded." };
-  if (r.status === "recent") return { ok: true, message: "Checked under a minute ago - these are the latest." };
-  return { ok: true, message: "No change since the last reading." };
+  if (r.status === "recent") return { ok: true, message: "Up to date - checked within the last minute." };
+  return { ok: true, message: "Up to date - no change since the last reading." };
 }
