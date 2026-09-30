@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import HomeList, { type HomeRow } from "@/components/HomeList";
 import { addDays, crore, fmtDate, fmtWhen, pct, sizeSplit, stageOf, times, todayIST } from "@/lib/format";
-import { describeRules, listIssues, matchesFor, rulesFor, type IssueRow, type Match } from "@/lib/queries";
+import { describeRules, listIssues, matchesFor, rulesFor, type Board, type IssueRow, type Match } from "@/lib/queries";
 import { getViewer, viewerId } from "@/lib/viewer";
 import AlertsPitch from "@/components/AlertsPitch";
 import Ticker from "@/components/Ticker";
@@ -49,18 +49,25 @@ function toRow(i: IssueRow, today: string, m: Match | undefined): HomeRow {
   };
 }
 
-export default async function Home({ searchParams }: { searchParams: Promise<{ welcome?: string }> }) {
-  const { welcome } = await searchParams;
+const liveCount = (list: IssueRow[], today: string) =>
+  list.filter((i) => i.close_date && i.close_date >= today && i.open_date && i.open_date <= addDays(today, 10)).length;
+
+export default async function Home({ searchParams }: { searchParams: Promise<{ welcome?: string; board?: string }> }) {
+  const { welcome, board: boardParam } = await searchParams;
+  const board: Board = boardParam === "sme" ? "sme" : "mainboard";
+  const sme = board === "sme";
   const today = todayIST();
   // the verified id comes from the middleware, so the data queries start
   // alongside the account check instead of after it
   const uid = await viewerId();
-  const [viewer, issues, allMatches, rules] = await Promise.all([
+  const [viewer, issues, otherIssues, allMatches, rules] = await Promise.all([
     getViewer(),
-    listIssues(uid),
+    listIssues(uid, board),
+    listIssues(null, sme ? "mainboard" : "sme"), // only for the count on the other tab
     matchesFor(uid, today),
     rulesFor(uid),
   ]);
+  const counts = { mainboard: liveCount(sme ? otherIssues : issues, today), sme: liveCount(sme ? issues : otherIssues, today) };
   // The list is public; the radar, alerts and Applied/Skip are for approved members.
   const member = viewer?.status === "approved";
   // first sign-in after approval: pick a starting set of alerts
@@ -105,7 +112,21 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ w
             <h1>
               Live <em>IPOs</em>
             </h1>
-            {member ? (
+            {sme ? (
+              <p>
+                SME issues: small companies on NSE Emerge and BSE SME. Individuals apply for at least 2 lots (over ₹2 lakh),
+                and grey-market prices here are thin and swing more.
+                {member ? (
+                  <>
+                    {" "}
+                    {rules?.include_sme ? "They're in your alerts." : "They're not in your alerts."}{" "}
+                    <Link href="/settings#sme" className="link">
+                      Change
+                    </Link>
+                  </>
+                ) : null}
+              </p>
+            ) : member ? (
               <p>
                 Mainboard issues, open and upcoming.{" "}
                 {radar ? `${radar} on your radar` : "Nothing on your radar right now"}
@@ -119,6 +140,14 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ w
             )}
           </div>
         </div>
+        <nav className="board-tabs" aria-label="IPO type">
+          <Link href="/" className={sme ? "" : "on"} aria-current={sme ? undefined : "page"} scroll={false}>
+            Mainboard <span className="n">{counts.mainboard}</span>
+          </Link>
+          <Link href="/?board=sme" className={sme ? "on" : ""} aria-current={sme ? "page" : undefined} scroll={false}>
+            SME <span className="n">{counts.sme}</span>
+          </Link>
+        </nav>
         <Ticker items={ticker} />
         {member && welcome ? (
           <div className="saved-line" style={{ marginBottom: 16 }}>
@@ -135,9 +164,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ w
           </div>
         ) : null}
         {rows.length ? (
-          <HomeList rows={rows} personal={member} />
+          <HomeList key={board} rows={rows} personal={member} />
         ) : (
-          <div className="card empty">Nothing open, upcoming or recently listed.</div>
+          <div className="card empty">
+            {sme ? "No SME issue is open, upcoming or recently listed." : "Nothing open, upcoming or recently listed."}
+          </div>
         )}
       </main>
     </>

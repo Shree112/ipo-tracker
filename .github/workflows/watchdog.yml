@@ -1,0 +1,38 @@
+# Watchdog: checks that the data is still flowing and tells the admin (email,
+# plus Telegram if linked) when something stops or recovers.
+#
+# The same checks already run at the end of every hourly job - but if the
+# Supabase schedule stops (or the GitHub token it uses expires), the hourly
+# job stops too and nothing would notice. This runs on GitHub's own clock
+# instead, which is irregular but independent: even a few runs a day are
+# enough to catch a stopped schedule within hours. It only emails on changes.
+#
+# Move this file to .github/workflows/watchdog.yml
+name: watchdog
+
+on:
+  schedule:
+    - cron: "37 */3 * * *"   # every ~3 hours (GitHub may skip some - that's fine here)
+  workflow_dispatch:
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SITE_URL: ${{ secrets.SITE_URL }}
+      GMAIL_USER: ${{ secrets.GMAIL_USER }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      DIGEST_TO: ${{ secrets.DIGEST_TO }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Check the data and the schedule
+        run: python scripts/health.py --notify

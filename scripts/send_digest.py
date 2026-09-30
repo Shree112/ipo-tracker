@@ -169,11 +169,14 @@ def enrich(conn, today: date, ids: list[int]) -> list[dict]:
                       i.listing_date, i.price_band_low, i.price_band_high, i.lot_size,
                       i.issue_size_cr, i.fresh_issue_cr, i.ofs_cr, i.pe_ratio,
                       i.min_order_amount, i.rhp_url, i.anchor_report_url,
-                      i.investorgain_url, i.ipowatch_url
+                      i.investorgain_url, i.ipowatch_url, i.board
                FROM issues i WHERE i.id = ANY(%s)""",
             (ids,),
         )
         issues = cur.fetchall()
+        for i in issues:  # SME issues are flagged in the name everywhere the digest shows it
+            if i.get("board") == "sme" and "(SME)" not in i["name"]:
+                i["name"] = f"{i['name']} (SME)"
         cur.execute(
             """SELECT issue_id, source, observed_at, gmp_amount, gmp_pct FROM gmp_history
                WHERE issue_id = ANY(%s) AND gmp_amount IS NOT NULL AND gmp_pct IS NOT NULL

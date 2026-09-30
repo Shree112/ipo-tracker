@@ -97,6 +97,7 @@ export type IssueRow = {
   allotment: "allotted" | "not_allotted" | null;
   registrar: string | null;
   allotment_date: string | null;
+  board: "mainboard" | "sme";
   gmp_latest: { source: string; gmp_pct: number; gmp_amount: number; observed_at: string }[] | null;
   sub_latest: (Omit<SubPoint, "observed_at"> & { observed_at: string }) | null;
   peak_since_t1: number | null;
@@ -111,7 +112,7 @@ const ISSUE_COLUMNS = `
   i.price_band_low, i.price_band_high, i.lot_size, i.min_order_amount,
   i.issue_size_cr, i.fresh_issue_cr, i.ofs_cr, i.pe_ratio, i.exchanges,
   i.rhp_url, i.anchor_report_url, i.investorgain_url, i.ipowatch_url,
-  i.registrar, i.allotment_date,
+  i.registrar, i.allotment_date, i.board,
   (SELECT json_agg(x) FROM (
      SELECT DISTINCT ON (source) source, gmp_pct, gmp_amount, observed_at
      FROM gmp_history g WHERE g.issue_id = i.id AND g.gmp_pct IS NOT NULL
@@ -174,28 +175,30 @@ function withMark(i: Omit<IssueRow, "status" | "note" | "allotment">, m: Mark | 
   return { ...i, status: m?.status ?? "-", note: m?.note ?? null, allotment: m?.allotment ?? null };
 }
 
+export type Board = "mainboard" | "sme";
+
 const cachedList = unstable_cache(
-  async (today: string) => {
+  async (today: string, board: Board) => {
     const rows = await db().unsafe(
       `SELECT ${ISSUE_COLUMNS}
        FROM issues i
        LEFT JOIN listing_outcome lo ON lo.issue_id = i.id
-       WHERE i.board = 'mainboard' AND COALESCE(i.withdrawn, false) = false
+       WHERE i.board = $2 AND COALESCE(i.withdrawn, false) = false
          AND i.open_date IS NOT NULL
          AND i.open_date <= $1::date + 30
          AND COALESCE(i.listing_date, i.close_date + 7) >= $1::date - 7
        ORDER BY i.open_date, i.name`,
-      [today],
+      [today, board],
     );
     return plain(rows.map(normalise));
   },
-  ["issues-list-v2"],
+  ["issues-list-v3"],
   { revalidate: FRESH_SECONDS, tags: ["issues"] },
 );
 
 /** Everything worth seeing now: upcoming, open, awaiting listing, listed in the last week. */
-export async function listIssues(userId: string | null): Promise<IssueRow[]> {
-  const [rows, marks] = await within(Promise.all([cachedList(todayIST()), marksFor(userId)]), 9000, "live IPO list");
+export async function listIssues(userId: string | null, board: Board = "mainboard"): Promise<IssueRow[]> {
+  const [rows, marks] = await within(Promise.all([cachedList(todayIST(), board), marksFor(userId)]), 9000, "live IPO list");
   return rows.map((r) => withMark(r, marks.get(r.id)));
 }
 
@@ -268,7 +271,7 @@ const cachedIssue = unstable_cache(
     const chatter: Chatter | null = chatterRows[0] ?? null;
     return plain({ issue, gmp: [...gmp], subs: [...subs], snaps: [...snaps], history, refGmp, detail, chatter });
   },
-  ["issue-v2"],
+  ["issue-v3"],
   { revalidate: FRESH_SECONDS, tags: ["issues"] },
 );
 
@@ -388,6 +391,7 @@ export type Rules = {
   last_day_reminder: boolean;
   email_to: string | null;
   paused: boolean;
+  include_sme?: boolean;
   onboarded_at?: Date | null;
 };
 
@@ -407,13 +411,13 @@ export async function rulesFor(userId: string | null): Promise<Rules | null> {
   const [r] = await within(db()<Rules[]>`
     SELECT gmp_pct_min, profit_per_lot_min, sub_total_min, sub_retail_min, sub_qib_min, anchor_mf_min,
            size_min_cr, size_max_cr, match_mode, digest_hour, digest_days, start_at, last_day_reminder,
-           email_to, paused, onboarded_at
+           email_to, paused, onboarded_at, include_sme
     FROM alert_rules WHERE user_id = ${userId}::uuid`.catch((e: { code?: string }) => {
     // onboarded_at arrives with a schema update; until then, treat everyone as onboarded
     if (e?.code === "42703") return db()<Rules[]>`
       SELECT gmp_pct_min, profit_per_lot_min, sub_total_min, sub_retail_min, sub_qib_min, anchor_mf_min,
              size_min_cr, size_max_cr, match_mode, digest_hour, digest_days, start_at, last_day_reminder,
-             email_to, paused, now() AS onboarded_at
+             email_to, paused, now() AS onboarded_at, false AS include_sme
       FROM alert_rules WHERE user_id = ${userId}::uuid`;
     throw e;
   }), 9000, "alert rules");

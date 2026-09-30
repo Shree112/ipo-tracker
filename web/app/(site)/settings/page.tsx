@@ -55,6 +55,7 @@ async function save(fd: FormData) {
     last_day_reminder: fd.get("last_day_reminder") === "on",
     email_to: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTo) && emailTo.toLowerCase() !== v.email.toLowerCase() ? emailTo : null,
     paused: fd.get("paused") === "on",
+    include_sme: fd.get("include_sme") === "on",
   };
   await db()`
     INSERT INTO alert_rules ${db()({ user_id: v.id, ...r })}
@@ -66,7 +67,7 @@ async function save(fd: FormData) {
       match_mode = EXCLUDED.match_mode, digest_hour = EXCLUDED.digest_hour,
       digest_days = EXCLUDED.digest_days, start_at = EXCLUDED.start_at,
       last_day_reminder = EXCLUDED.last_day_reminder, email_to = EXCLUDED.email_to,
-      paused = EXCLUDED.paused, updated_at = now()`;
+      paused = EXCLUDED.paused, include_sme = EXCLUDED.include_sme, updated_at = now()`;
   await db()`UPDATE alert_rules SET onboarded_at = COALESCE(onboarded_at, now()) WHERE user_id = ${v.id}::uuid`.catch(() => undefined);
   const wanted = String(fd.get("channel") ?? "email");
   if (["email", "telegram", "both"].includes(wanted)) {
@@ -312,6 +313,15 @@ export default async function Settings({ searchParams }: { searchParams: Promise
                 ) : null}
               </select>
             </div>
+            <label className="check" id="sme">
+              <input type="checkbox" name="include_sme" defaultChecked={Boolean(r.include_sme)} />
+              <span>
+                <b>Include SME IPOs</b>
+                <span className="hint">
+                  Small-company issues on NSE Emerge / BSE SME. Minimum 2 lots (over ₹2 lakh); GMPs are thinner and swing more
+                </span>
+              </span>
+            </label>
             <label className="check">
               <input type="checkbox" name="last_day_reminder" defaultChecked={r.last_day_reminder} />
               <span>

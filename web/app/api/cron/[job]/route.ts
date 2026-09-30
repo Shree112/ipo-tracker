@@ -74,7 +74,7 @@ async function handle(req: NextRequest, job: string) {
     const [open] = await within(
       db()<{ n: number }[]>`
         SELECT count(*)::int AS n FROM issues
-        WHERE board = 'mainboard' AND NOT COALESCE(withdrawn, false) AND ${today}::date BETWEEN open_date AND close_date`,
+        WHERE board IN ('mainboard', 'sme') AND NOT COALESCE(withdrawn, false) AND ${today}::date BETWEEN open_date AND close_date`,
       6000,
       "open issues",
     );

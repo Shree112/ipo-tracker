@@ -420,14 +420,18 @@ CROSS JOIN (SELECT user_id FROM app_users WHERE is_admin ORDER BY created_at LIM
 WHERE s.status <> 'eligible'
 ON CONFLICT (user_id, issue_id) DO NOTHING;
 
--- Everything a rule can test, per live mainboard issue, in one place - used
--- by the Python digest and the website alike, so they can never disagree.
+-- SME IPOs reach a member's alerts only if they switch this on (Alerts page).
+ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS include_sme boolean NOT NULL DEFAULT false;
+
+-- Everything a rule can test, per live issue (mainboard and SME), in one place -
+-- used by the Python digest and the website alike, so they can never disagree.
 CREATE OR REPLACE VIEW issue_signals AS
 SELECT i.id AS issue_id, i.slug, i.name, i.open_date, i.close_date, i.lot_size, i.issue_size_cr,
        g.gmp_pct, g.gmp_amount,
        pk.peak_pct_t1, pk.peak_pct_open, pk.peak_amt_t1, pk.peak_amt_open,
        s.total_x, s.rii_x, s.qib_x,
-       NULLIF(d.anchor_summary->>'mf_pct', '')::numeric AS anchor_mf_pct
+       NULLIF(d.anchor_summary->>'mf_pct', '')::numeric AS anchor_mf_pct,
+       i.board
 FROM issues i
 LEFT JOIN LATERAL (
   SELECT h.gmp_pct, h.gmp_amount FROM gmp_history h
@@ -443,7 +447,7 @@ LEFT JOIN LATERAL (
   SELECT x.total_x, x.rii_x, x.qib_x FROM subscription x
   WHERE x.issue_id = i.id ORDER BY x.observed_at DESC LIMIT 1) s ON true
 LEFT JOIN issue_detail d ON d.issue_id = i.id
-WHERE i.board = 'mainboard' AND COALESCE(i.withdrawn, false) = false
+WHERE i.board IN ('mainboard', 'sme') AND COALESCE(i.withdrawn, false) = false
   AND i.open_date IS NOT NULL AND i.close_date IS NOT NULL;
 
 -- Who should hear about what, today. Entry: the person's rule matches (all
@@ -466,6 +470,7 @@ LANGUAGE sql STABLE AS $$
     JOIN app_users u ON u.user_id = r.user_id AND u.status = 'approved'
     CROSS JOIN issue_signals s
     WHERE p_today BETWEEN (CASE WHEN r.start_at = 'open' THEN s.open_date ELSE s.open_date - 1 END) AND s.close_date
+      AND (s.board = 'mainboard' OR r.include_sme)
   ), t AS (
     SELECT c.*,
       CASE WHEN gmp_pct_min IS NULL THEN NULL ELSE COALESCE(gmp_x >= gmp_pct_min, false) END AS ok_gmp,

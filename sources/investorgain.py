@@ -95,12 +95,12 @@ def _ist(v: Any) -> datetime | None:
 
 # ---------------------------------------------------------------- live list
 
-def live_issue_urls(html: str) -> list[dict[str, Any]]:
-    """Every issue the live report links to: [{ig_id, url, name}].
+def live_issue_urls(html: str, include_sme: bool = False) -> list[dict[str, Any]]:
+    """Every issue the live report links to: [{ig_id, url, name, sme}].
 
     Reads link paths wherever they appear in the report rows rather than
     trusting one column name, so a renamed column doesn't silently empty the
-    list. Mainboard filtering happens later, on the issue page itself.
+    list. Mainboard vs SME is settled later, on the issue page itself.
     """
     flight = flight_payload(html)
     rows = _array(flight, "reportTableData")
@@ -111,7 +111,7 @@ def live_issue_urls(html: str) -> list[dict[str, Any]]:
         # Skip SME rows early when the report labels them - saves a page
         # fetch each. Unlabelled rows are kept and filtered on the issue page.
         cat = str(row.get("~IPO_Category") or "").strip().upper()
-        if cat and cat != "IPO":
+        if cat and cat != "IPO" and not (include_sme and cat == "SME"):
             continue
         blob = json.dumps(row, ensure_ascii=False)
         m = _ISSUE_PATH.search(blob)
@@ -122,7 +122,7 @@ def live_issue_urls(html: str) -> list[dict[str, Any]]:
             continue
         seen.add(ig_id)
         name = re.sub(r"<[^>]+>", " ", str(row.get("IPO") or row.get("Name") or m.group(1)))
-        out.append({"ig_id": ig_id, "url": f"{HOST}{m.group(0)}", "name": " ".join(name.split())})
+        out.append({"ig_id": ig_id, "url": f"{HOST}{m.group(0)}", "name": " ".join(name.split()), "sme": cat == "SME"})
     return out
 
 
@@ -206,8 +206,8 @@ def get_page(url: str, *, use_cache: bool = False) -> str:
     return html
 
 
-def fetch_live(*, use_cache: bool = False) -> list[dict[str, Any]]:
-    return live_issue_urls(get_page(LIVE_URL, use_cache=use_cache))
+def fetch_live(*, use_cache: bool = False, include_sme: bool = False) -> list[dict[str, Any]]:
+    return live_issue_urls(get_page(LIVE_URL, use_cache=use_cache), include_sme=include_sme)
 
 
 def fetch_issue(url: str, *, use_cache: bool = False) -> dict[str, Any]:

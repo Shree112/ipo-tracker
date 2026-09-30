@@ -33,6 +33,7 @@ import { BSE_STATUS, registrarLink } from "@/lib/registrars";
 import { lotTable } from "@/lib/lots";
 import { lastSubscriptionCheck } from "@/lib/subscription";
 import RefreshSubscription from "@/components/RefreshSubscription";
+import BrokerLinks from "@/components/BrokerLinks";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,7 @@ const LOT_LABEL: Record<string, [string, string]> = {
   "Small HNI (min)": ["Small HNI", "smallest bid"],
   "Small HNI (max)": ["Small HNI", "largest bid"],
   "Big HNI (min)": ["Big HNI", "smallest bid"],
+  "Individual (min)": ["Individual", "smallest bid (2 lots, over ₹2 lakh)"],
 };
 const IST_MS = 5.5 * 3_600_000;
 const istMidnight = (iso: string) => Date.parse(`${iso}T00:00:00Z`) - IST_MS;
@@ -142,7 +144,10 @@ export default async function IssuePage({
   const canDecide = stage.key !== "listed";
   // bidding is live (or closed yesterday: the final numbers can still land the next morning)
   const subLive = !!i.open_date && !!i.close_date && i.open_date <= today && today <= addDays(i.close_date, 1);
-  const lots = lotTable(i.lot_size, i.price_band_high);
+  const sme = i.board === "sme";
+  const lots = lotTable(i.lot_size, i.price_band_high, i.board);
+  // bidding is open, or opens within three days (brokers take pre-applications)
+  const canApply = !!i.open_date && !!i.close_date && today <= i.close_date && i.open_date <= addDays(today, 3);
   // While bidding is live, the card's time is when we last checked the source,
   // not when the numbers last moved - a check that finds no change still counts.
   const checkedAt = subLive && subChecked ? new Date(subChecked) : null;
@@ -161,7 +166,7 @@ export default async function IssuePage({
   ];
   const shortName = i.name.replace(/ (Ltd|Limited)\.?$/i, "");
   const meta = [
-    "Mainboard",
+    sme ? "SME" : "Mainboard",
     i.exchanges?.replace(",", ", ").replace(/\s+/g, " "),
     i.price_band_high ? `Price band ${band(i.price_band_low, i.price_band_high)}` : null,
   ].filter(Boolean);
@@ -290,6 +295,8 @@ export default async function IssuePage({
           })()
         ) : null}
 
+        {canApply ? <BrokerLinks name={shortName} preApply={!!i.open_date && today < i.open_date} /> : null}
+
         <div className="card section">
           <div className="stepper">
             {steps.map(([k, d]) => (
@@ -309,7 +316,7 @@ export default async function IssuePage({
             summary={
               <>
                 <span className="chip">
-                  1 lot <b>{rupees(lots[0].amount, 0)}</b>
+                  {sme ? "minimum bid" : "1 lot"} <b>{rupees(lots[0].amount, 0)}</b>
                 </span>
                 {lots.find((l) => l.category === "Retail (max)") ? (
                   <span className="chip">
@@ -349,9 +356,15 @@ export default async function IssuePage({
               </table>
             </div>
             <ul className="xs muted lots-key">
-              <li>
-                <b>Retail</b>: individuals bidding up to ₹2 lakh.
-              </li>
+              {sme ? (
+                <li>
+                  <b>Individual</b>: on SME issues individuals must bid at least 2 lots, and more than ₹2 lakh.
+                </li>
+              ) : (
+                <li>
+                  <b>Retail</b>: individuals bidding up to ₹2 lakh.
+                </li>
+              )}
               <li>
                 <b>Small HNI</b> (sNII): above ₹2 lakh, up to ₹10 lakh.
               </li>
@@ -511,7 +524,7 @@ export default async function IssuePage({
             <Financials detail={detail} />
             <Peers detail={detail} companyName={i.name} />
             <Objects detail={detail} />
-            {history && history.n > 0 && refGmp !== null ? (
+            {!sme && history && history.n > 0 && refGmp !== null ? (
               <Fold
                 id="history"
                 title="What history says"

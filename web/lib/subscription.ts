@@ -236,19 +236,25 @@ async function fetchChittorgarh(): Promise<Reading[]> {
   const y = ist.getUTCFullYear();
   const m = ist.getUTCMonth() + 1;
   const fyStart = m >= 4 ? y : y - 1;
-  const url =
-    process.env.CG_SUBSCRIPTION_URL || // override only for tests
-    `${CG_API}/${m}/${y}/${fyStart}-${String((fyStart + 1) % 100).padStart(2, "0")}/0/mainboard/0`;
-  const r = await fetch(url, {
-    headers: {
-      "user-agent": process.env.SCRAPER_USER_AGENT || "ipo-tracker/0.1 (personal research project)",
-      accept: "application/json",
-    },
-    signal: AbortSignal.timeout(15000),
-    cache: "no-store",
-  });
-  if (!r.ok) throw new Error(`Chittorgarh answered ${r.status}`);
-  return parseChittorgarh(await r.json());
+  const fy = `${fyStart}-${String((fyStart + 1) % 100).padStart(2, "0")}`;
+  const get = async (board: "mainboard" | "sme") => {
+    const url =
+      process.env.CG_SUBSCRIPTION_URL?.replace("{board}", board) || // override only for tests
+      `${CG_API}/${m}/${y}/${fy}/0/${board}/0`;
+    const r = await fetch(url, {
+      headers: {
+        "user-agent": process.env.SCRAPER_USER_AGENT || "ipo-tracker/0.1 (personal research project)",
+        accept: "application/json",
+      },
+      signal: AbortSignal.timeout(15000),
+      cache: "no-store",
+    });
+    if (!r.ok) throw new Error(`Chittorgarh answered ${r.status}`);
+    return parseChittorgarh(await r.json());
+  };
+  // mainboard must work; SME is a bonus that never sinks the mainboard update
+  const [main, sme] = await Promise.all([get("mainboard"), get("sme").catch(() => [] as Reading[])]);
+  return [...main, ...sme];
 }
 
 async function fetchInvestorGain(): Promise<Reading[]> {

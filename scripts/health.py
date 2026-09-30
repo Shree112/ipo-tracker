@@ -74,6 +74,25 @@ def evaluate(conn) -> list[dict]:
         out.append({"key": "delivery", "label": "Email / Telegram delivery", "ok": r["n"] < 3,
                     "detail": f"{r['n']} failed in 24h" + (f" (latest: {r['err']})" if r["n"] else "")})
 
+        # the clock itself: Supabase's pg_cron calls the site, which starts the
+        # hourly GitHub job. A failing call (site down, expired GitHub token)
+        # shows up here before the data goes stale everywhere.
+        try:
+            cur.execute("SAVEPOINT cron_check")
+            cur.execute("""SELECT max(d.start_time) FILTER (WHERE d.status = 'succeeded') AS last_ok,
+                                  count(*) FILTER (WHERE d.status = 'failed' AND d.start_time > now() - interval '3 hours') AS failed
+                           FROM cron.job_run_details d JOIN cron.job j ON j.jobid = d.jobid
+                           WHERE j.jobname = 'ipo-refresh' AND d.start_time > now() - interval '2 days'""")
+            r = cur.fetchone()
+            cur.execute("RELEASE SAVEPOINT cron_check")
+            if r and (r["last_ok"] or r["failed"]):
+                ok = bool(r["last_ok"]) and now - r["last_ok"] < timedelta(hours=2) and not r["failed"]
+                out.append({"key": "scheduler", "label": "Supabase schedule (hourly job)", "ok": ok,
+                            "detail": (f"last run {r['last_ok'].astimezone(IST):%d %b %H:%M}" if r["last_ok"] else "no successful run")
+                                      + (f", {r['failed']} failed in 3h" if r["failed"] else "")})
+        except Exception:  # noqa: BLE001 - no pg_cron here (local dev): skip the check
+            cur.execute("ROLLBACK TO SAVEPOINT cron_check")
+
         # comment + company summaries (chatter job, twice a day)
         cur.execute("SELECT max(fetched_at) AS last FROM issue_chatter")
         last = cur.fetchone()["last"]
@@ -131,6 +150,13 @@ def check(conn, send_email) -> None:
 
 
 if __name__ == "__main__":
+    # --notify: also email/Telegram the admin about changes. The watchdog
+    # workflow runs this on GitHub's own clock, so a stopped Supabase schedule
+    # (which also stops the hourly job that normally runs these checks) still
+    # gets noticed.
     with db.connect() as c:
         for r in evaluate(c):
             print(f"{'OK  ' if r['ok'] else 'DOWN'}  {r['label']:<42} {r['detail']}")
+        if "--notify" in sys.argv:
+            from send_digests import send_email
+            check(c, send_email)

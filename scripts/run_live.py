@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -51,16 +52,26 @@ def ist_start(d: date) -> datetime:
 
 # ---------------------------------------------------------------- fetch
 
+SME_MAX = int(os.getenv("SME_MAX_PAGES", "40"))  # SME pages fetched per full run, politely capped
+
+
 def fetch_investorgain(use_cache: bool) -> tuple[list[dict], list[str]]:
-    """Mainboard issues from the live report, with their pages parsed."""
+    """Mainboard and SME issues from the live report, with their pages parsed.
+    SME issues are shown on their own tab on the site and only reach members
+    who switch them on, so the calibration and research stay mainboard."""
     issues, problems = [], []
-    for item in ig.fetch_live(use_cache=use_cache):
+    sme_seen = 0
+    for item in ig.fetch_live(use_cache=use_cache, include_sme=True):
+        if item.get("sme"):
+            sme_seen += 1
+            if sme_seen > SME_MAX:
+                continue
         try:
             rec = ig.fetch_issue(item["url"], use_cache=use_cache)
         except (ig.ParseError, base.FetchError, ValueError) as exc:
             problems.append(f"{item['name']}: {str(exc)[:80]}")
             continue
-        if rec["mainboard"] and not rec["withdrawn"]:
+        if not rec["withdrawn"]:
             issues.append(rec)
     return issues, problems
 
@@ -109,7 +120,7 @@ def write_investorgain(conn, issues: list[dict], log) -> dict[int, int]:
     for rec in issues:
         log.seen += 1
         issue_id = db.upsert_issue(
-            conn, slug=resolve_slug(conn, rec), name=rec["name"], board="mainboard",
+            conn, slug=resolve_slug(conn, rec), name=rec["name"], board="mainboard" if rec["mainboard"] else "sme",
             issue_type=rec["issue_type"] or None, exchanges=rec["exchanges"],
             chittorgarh_id=rec["cor_id"], investorgain_id=rec["ig_id"], investorgain_url=rec["url"],
             open_date=rec["open_date"], close_date=rec["close_date"], anchor_date=rec["anchor_date"],
@@ -264,7 +275,7 @@ def write_subscription(conn, subs: list[dict], log) -> int:
             log.seen += 1
             issue_id = issue_of.get(s["ig_id"])
             if issue_id is None:
-                continue  # SME, or an issue the GMP report doesn't list
+                continue  # an issue we don't track (withdrawn, or an SME beyond the page cap)
             matched += 1
             if s.get("pe_ratio") is not None:
                 cur.execute("UPDATE issues SET pe_ratio = %s WHERE id = %s", (s["pe_ratio"], issue_id))
@@ -403,14 +414,14 @@ def board(issues: list[dict], iw_rows: list[dict], today: date) -> None:
 # ---------------------------------------------------------------- light mode
 
 def live_issues_from_db(conn, today: date) -> list[dict]:
-    """Mainboard issues whose window is near today, shaped like the IG records
+    """Mainboard and SME issues whose window is near today, shaped like the IG records
     the writers expect (issue_id, ig_id, name, open_date, price_band_high)."""
     with conn.cursor() as cur:
         cur.execute(
             """SELECT id AS issue_id, investorgain_id AS ig_id, name, open_date, close_date,
-                      price_band_high
+                      price_band_high, board
                FROM issues
-               WHERE board = 'mainboard' AND investorgain_id IS NOT NULL
+               WHERE board IN ('mainboard', 'sme') AND investorgain_id IS NOT NULL
                  AND open_date BETWEEN %s AND %s""",
             (today - timedelta(days=15), today + timedelta(days=10)),
         )
@@ -442,7 +453,7 @@ def light_once(conn, today: date) -> str:
         with conn.cursor() as cur:
             for r in rows:
                 k = by_ig.get(r["ig_id"])
-                if not k or r["category"] not in ("IPO", "") or r["observed_at"] is None:
+                if not k or r["category"] not in ("IPO", "SME", "") or r["observed_at"] is None:
                     continue
                 log.seen += 1
                 mode = "live" if now - r["observed_at"] <= timedelta(hours=36) else "backfill"
@@ -475,7 +486,7 @@ def light_once(conn, today: date) -> str:
         except (iw.ParseError, base.FetchError) as exc:
             iw_rows = []
             notes.append(f"IPO Watch failed: {exc}")
-        write_ipowatch(conn, iw_rows, known, log)
+        write_ipowatch(conn, iw_rows, [k for k in known if k["board"] == "mainboard"], log)
         notes.append(f"IPO Watch {log.written} new")
 
     frozen = [f for f in freeze_t_minus_1(conn, today) + freeze_close_day(conn, today) if "skipped" not in f]
@@ -533,7 +544,8 @@ def main() -> None:
     today = today_ist()
 
     ig_issues, ig_problems = fetch_investorgain(args.use_cache)
-    print(f"InvestorGain: {len(ig_issues)} live mainboard issues")
+    main_issues = [r for r in ig_issues if r["mainboard"]]  # IPO Watch and the board printout are mainboard-only
+    print(f"InvestorGain: {len(main_issues)} live mainboard issues, {len(ig_issues) - len(main_issues)} SME")
     for p in ig_problems:
         print(f"  could not read: {p}")
     try:
@@ -563,19 +575,19 @@ def main() -> None:
                     rec["issue_id"] = ids[rec["ig_id"]]
                 print(f"\nupserted {len(ids)} issues, {getattr(log, 'gmp_new', 0)} new InvestorGain GMP readings")
             with db.RunLog(conn, "ipowatch-live") as log:
-                unmatched = write_ipowatch(conn, iw_rows, ig_issues, log)
+                unmatched = write_ipowatch(conn, iw_rows, main_issues, log)
                 print(f"wrote {log.written} IPO Watch GMP readings")
                 if unmatched:
                     print(f"  IPO Watch rows not matched to an InvestorGain issue: {', '.join(unmatched)}")
             with db.RunLog(conn, "investorgain-subscription") as log:
                 n = write_subscription(conn, subs, log)
-                print(f"subscription: {n} mainboard issues matched, {log.written} changed readings written")
+                print(f"subscription: {n} issues matched, {log.written} changed readings written")
             frozen = ([f"T-1       {x}" for x in freeze_t_minus_1(conn, today)]
                       + [f"close day {x}" for x in freeze_close_day(conn, today)])
             for f in frozen:
                 print(f"snapshot: {f}")
 
-    board(ig_issues, iw_rows, today)
+    board(main_issues, iw_rows, today)
 
 
 if __name__ == "__main__":
