@@ -30,6 +30,9 @@ import AskProspectus from "@/components/AskProspectus";
 import { askReady, prospectusStatus } from "@/lib/ask";
 import AllotmentCard from "@/components/AllotmentCard";
 import { BSE_STATUS, registrarLink } from "@/lib/registrars";
+import { lotTable } from "@/lib/lots";
+import { lastSubscriptionCheck } from "@/lib/subscription";
+import RefreshSubscription from "@/components/RefreshSubscription";
 
 export const dynamic = "force-dynamic";
 
@@ -80,12 +83,13 @@ export default async function IssuePage({
   const [{ slug }, { src }] = await Promise.all([params, searchParams]);
   const today = todayIST();
   const uid = await viewerId();
-  const [viewer, data, allMatches, allRules, rhpDoc] = await Promise.all([
+  const [viewer, data, allMatches, allRules, rhpDoc, subChecked] = await Promise.all([
     getViewer(),
     getIssue(slug, uid),
     matchesFor(uid, today),
     rulesFor(uid),
     askReady() && uid ? prospectusStatus(slug) : Promise.resolve(null),
+    uid ? lastSubscriptionCheck() : Promise.resolve(null),
   ]);
   if (!data) notFound();
   if (src === "email" || src === "tg") logEvent(src === "email" ? "email_click" : "tg_click", viewer?.id ?? null, slug);
@@ -129,6 +133,9 @@ export default async function IssuePage({
   const closeSnap = snaps.find((s) => s.phase === "close_day");
   const listed = i.listing_gain_pct !== null;
   const canDecide = stage.key !== "listed";
+  // bidding is live (or closed yesterday: the final numbers can still land the next morning)
+  const subLive = !!i.open_date && !!i.close_date && i.open_date <= today && today <= addDays(i.close_date, 1);
+  const lots = lotTable(i.lot_size, i.price_band_high);
 
 
   const steps: [string, string | null][] = [
@@ -281,6 +288,40 @@ export default async function IssuePage({
           </div>
         </div>
 
+        {lots.length ? (
+          <section className="card section" id="lots">
+            <div className="card-head">
+              <h2>How much to apply</h2>
+              <span className="sub">at the upper band, {rupees(i.price_band_high)} a share</span>
+            </div>
+            <div className="table-wrap">
+              <table className="lots">
+                <thead>
+                  <tr>
+                    <th>Category</th>
+                    <th className="r">Lots</th>
+                    <th className="r">Shares</th>
+                    <th className="r">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lots.map((l) => (
+                    <tr key={l.category}>
+                      <td>{l.category}</td>
+                      <td className="r">{l.lots}</td>
+                      <td className="r">{l.shares.toLocaleString("en-IN")}</td>
+                      <td className="r">{rupees(l.amount, 0)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="xs muted" style={{ marginTop: 8 }}>
+              Retail bids up to ₹2 lakh, small HNI above ₹2 lakh up to ₹10 lakh, big HNI above ₹10 lakh.
+            </p>
+          </section>
+        ) : null}
+
         <AboutCompany detail={detail} shortName={shortName} sourceUrl={i.investorgain_url} />
 
         <nav className="subnav" aria-label="On this page">
@@ -347,6 +388,9 @@ export default async function IssuePage({
               <h2>Subscription</h2>
               {sub ? <span className="sub">as of {fmtWhen(sub.observed_at, today)}</span> : null}
             </div>
+            {member && subLive ? (
+              <RefreshSubscription slug={i.slug} checked={subChecked ? fmtWhen(subChecked, today) : null} />
+            ) : null}
             {sub ? (
               <>
                 <SubBars sub={sub} />

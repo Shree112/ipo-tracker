@@ -68,9 +68,16 @@ async function save(fd: FormData) {
       last_day_reminder = EXCLUDED.last_day_reminder, email_to = EXCLUDED.email_to,
       paused = EXCLUDED.paused, updated_at = now()`;
   await db()`UPDATE alert_rules SET onboarded_at = COALESCE(onboarded_at, now()) WHERE user_id = ${v.id}::uuid`.catch(() => undefined);
-  const channel = String(fd.get("channel") ?? "email");
-  if (["email", "telegram", "both"].includes(channel))
-    await db()`UPDATE alert_rules SET channel = ${channel} WHERE user_id = ${v.id}::uuid`.catch(() => undefined);
+  const wanted = String(fd.get("channel") ?? "email");
+  if (["email", "telegram", "both"].includes(wanted)) {
+    // Telegram only once this member has linked it; otherwise alerts would go nowhere
+    await db()`
+      UPDATE alert_rules SET channel = CASE
+        WHEN ${wanted} = 'email' THEN 'email'
+        WHEN (SELECT telegram_chat_id FROM app_users WHERE user_id = ${v.id}::uuid) IS NOT NULL THEN ${wanted}
+        ELSE 'email' END
+      WHERE user_id = ${v.id}::uuid`;
+  }
   revalidatePath("/settings");
   redirect("/settings?saved=1");
 }
@@ -141,7 +148,8 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           WHERE u.user_id = ${uid}::uuid`.catch(() => [])
       : Promise.resolve([]),
   ]), 9000, "alert settings");
-  const tgLinked = Boolean(tgRow[0]?.chat);
+  const tgReady = telegramReady();
+  const tgLinked = tgReady && Boolean(tgRow[0]?.chat);
   const channel = tgRow[0]?.channel ?? "email";
   const r: Rules = rules ?? {
     gmp_pct_min: 10,
@@ -282,12 +290,26 @@ export default async function Settings({ searchParams }: { searchParams: Promise
             <div className="field-row">
               <label htmlFor="channel">
                 <span>Deliver by</span>
-                <span className="hint">{tgLinked ? "Telegram is connected" : "Connect Telegram below to use it"}</span>
+                <span className="hint">
+                  {!tgReady
+                    ? "Email only for now - Telegram isn't switched on for this site yet"
+                    : tgLinked
+                      ? "Telegram is connected"
+                      : "Tap Connect Telegram below first, then pick Telegram here"}
+                </span>
               </label>
               <select id="channel" name="channel" className="input" defaultValue={tgLinked ? channel : "email"}>
                 <option value="email">Email</option>
-                <option value="telegram" disabled={!tgLinked}>Telegram</option>
-                <option value="both" disabled={!tgLinked}>Email and Telegram</option>
+                {tgReady ? (
+                  <>
+                    <option value="telegram" disabled={!tgLinked}>
+                      Telegram{tgLinked ? "" : " (connect first)"}
+                    </option>
+                    <option value="both" disabled={!tgLinked}>
+                      Email and Telegram{tgLinked ? "" : " (connect first)"}
+                    </option>
+                  </>
+                ) : null}
               </select>
             </div>
             <label className="check">
@@ -316,7 +338,19 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           </div>
         </form>
 
-        {telegramReady() ? (
+        {!tgReady && viewer.isAdmin ? (
+          <section className="card section tg-card">
+            <div className="grow">
+              <h2>Telegram (admin)</h2>
+              <p className="small muted" style={{ marginTop: 6 }}>
+                Not set up yet, so members only see Email. Add TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME and
+                TELEGRAM_WEBHOOK_SECRET on Vercel, redeploy, then press Connect webhook on the admin dashboard.
+              </p>
+            </div>
+          </section>
+        ) : null}
+
+        {tgReady ? (
           <section className="card section tg-card">
             <div className="grow">
               <h2>Telegram</h2>

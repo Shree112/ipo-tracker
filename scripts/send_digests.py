@@ -43,6 +43,7 @@ import notify  # noqa: E402
 from sources.ipowatch import IST  # noqa: E402
 
 REMINDER_HOUR = 13
+CATCH_UP_HOURS = 3  # send a missed digest up to this many hours late
 
 
 def send_email(to: str, subj: str, html_body: str, text_body: str) -> str:
@@ -78,9 +79,20 @@ def due_users(conn, target_hour: int, today: date, only_email: str | None) -> li
             continue
         if r["digest_days"] == "weekdays" and today.weekday() >= 5:
             continue
-        if r["digest_hour"] == target_hour or (target_hour == REMINDER_HOUR and r["last_day_reminder"]):
+        # A run can start late (or an hourly run can be skipped), so anything due in
+        # the last few hours and not yet sent today still goes out; user_digest_run
+        # stops it going twice.
+        if 0 <= target_hour - r["digest_hour"] <= CATCH_UP_HOURS or (
+                0 <= target_hour - REMINDER_HOUR <= CATCH_UP_HOURS and r["last_day_reminder"]):
             out.append(r)
     return out
+
+
+def _sent(conn, user_id: str, today: date, kind: str) -> bool:
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM user_digest_run WHERE user_id = %s::uuid AND digest_date = %s AND kind = %s",
+                    (user_id, today, kind))
+        return cur.fetchone() is not None
 
 
 def matches_for(conn, today: date, user_id: str) -> dict[int, dict]:
@@ -232,8 +244,12 @@ def main() -> None:
         if not users:
             print(f"{today} {target_hour:02d}h: no digests due")
         for u in users:
-            reminder = (target_hour == REMINDER_HOUR and u["last_day_reminder"]
-                        and u["digest_hour"] != REMINDER_HOUR and not args.user)
+            # the 1pm last-day reminder, unless the daily digest is still owed (it goes first)
+            daily_owed = (0 <= target_hour - u["digest_hour"] <= CATCH_UP_HOURS
+                          and not _sent(conn, u["user_id"], today, "daily"))
+            reminder = (not args.user and not daily_owed and u["last_day_reminder"]
+                        and u["digest_hour"] != REMINDER_HOUR
+                        and 0 <= target_hour - REMINDER_HOUR <= CATCH_UP_HOURS)
             kind = "reminder" if reminder else "daily"
             with conn.cursor() as cur:
                 cur.execute("SELECT 1 FROM user_digest_run WHERE user_id = %s::uuid AND digest_date = %s AND kind = %s",

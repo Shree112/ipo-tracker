@@ -56,3 +56,19 @@ export async function askProspectus(slug: string, question: string): Promise<Ask
     return { ok: false, error: "The model didn't answer in time. Try again in a moment." };
   }
 }
+
+export type RefreshSubResult = { ok: boolean; message: string };
+
+/** The Refresh button on the Subscription card: fetch InvestorGain's live
+ *  report now (members only; a fetch in the last minute is reused). */
+export async function refreshSubscriptionNow(slug: string): Promise<RefreshSubResult> {
+  const viewer = await getViewer();
+  if (!viewer || viewer.status !== "approved") return { ok: false, message: "Sign in to refresh." };
+  const { refreshSubscription } = await import("@/lib/subscription");
+  const r = await refreshSubscription("button");
+  revalidatePath(`/issue/${slug}`);
+  if (r.status === "error") return { ok: false, message: "Couldn't reach the source just now - try again in a minute." };
+  if (r.status === "updated") return { ok: true, message: "New numbers loaded." };
+  if (r.status === "recent") return { ok: true, message: "Checked under a minute ago - these are the latest." };
+  return { ok: true, message: "No change since the last reading." };
+}
