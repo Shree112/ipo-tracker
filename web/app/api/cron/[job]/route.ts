@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { db, within } from "@/lib/db";
 import { todayIST } from "@/lib/format";
 import { refreshSubscription } from "@/lib/subscription";
+import { startWorkflow, WORKFLOWS } from "@/lib/github";
 
 // The clock for everything that has to happen on time. A Supabase cron job
 // (pg_cron + pg_net, see scripts/supabase_cron.sql) calls these URLs, because
@@ -17,12 +18,6 @@ import { refreshSubscription } from "@/lib/subscription";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
-
-const WORKFLOWS: Record<string, { file: string; inputs?: Record<string, string> }> = {
-  refresh: { file: "refresh.yml", inputs: { mode: "hourly" } },
-  live: { file: "live.yml" },
-  chatter: { file: "chatter.yml" },
-};
 
 function authorised(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET ?? "";
@@ -42,26 +37,9 @@ function marketHours(): boolean {
 }
 
 async function dispatch(job: string) {
-  const wf = WORKFLOWS[job];
-  const token = process.env.GITHUB_DISPATCH_TOKEN;
-  const repo = process.env.GITHUB_REPO || "Shree112/ipo-tracker";
-  if (!token) return NextResponse.json({ ok: false, error: "GITHUB_DISPATCH_TOKEN is not set on Vercel" }, { status: 501 });
-  const r = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/${wf.file}/dispatches`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      accept: "application/vnd.github+json",
-      "x-github-api-version": "2022-11-28",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ ref: "main", ...(wf.inputs ? { inputs: wf.inputs } : {}) }),
-    signal: AbortSignal.timeout(15000),
-  });
-  if (r.status !== 204) {
-    const detail = (await r.text()).slice(0, 300);
-    return NextResponse.json({ ok: false, error: `GitHub answered ${r.status}`, detail }, { status: 502 });
-  }
-  return NextResponse.json({ ok: true, started: wf.file });
+  const r = await startWorkflow(job);
+  if (!r.ok) return NextResponse.json({ ok: false, error: r.error, detail: r.detail }, { status: r.status });
+  return NextResponse.json({ ok: true, started: WORKFLOWS[job].file });
 }
 
 async function handle(req: NextRequest, job: string) {
@@ -82,7 +60,7 @@ async function handle(req: NextRequest, job: string) {
     const result = await refreshSubscription("cron");
     return NextResponse.json({ ok: result.status !== "error", ...result }, { status: result.status === "error" ? 502 : 200 });
   }
-  if (job in WORKFLOWS) return dispatch(job);
+  if (job in WORKFLOWS && job !== "accounts") return dispatch(job);
   return new NextResponse("unknown job", { status: 404 });
 }
 

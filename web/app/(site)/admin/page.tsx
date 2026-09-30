@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db, within } from "@/lib/db";
 import { fmtDate } from "@/lib/format";
 import { getViewer, maxUsers, requireAdmin } from "@/lib/viewer";
+import { startWorkflow } from "@/lib/github";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Members" };
@@ -32,6 +33,10 @@ async function decide(fd: FormData) {
     if (n >= maxUsers()) redirect("/admin?full=1");
     await sql`UPDATE app_users SET status = 'approved', decided_at = now() WHERE user_id = ${id}::uuid`;
     await sql`INSERT INTO alert_rules (user_id) VALUES (${id}::uuid) ON CONFLICT (user_id) DO NOTHING`;
+    // "You're in" email now, not at the next hourly run (which still covers it if this fails)
+    const started = await startWorkflow("accounts").catch(() => ({ ok: false }));
+    revalidatePath("/admin");
+    redirect(started.ok ? "/admin?approved=mail" : "/admin?approved=later");
   } else {
     await sql`UPDATE app_users SET status = 'rejected', decided_at = now() WHERE user_id = ${id}::uuid AND NOT is_admin`;
   }
@@ -68,8 +73,8 @@ function Row({ m, actions }: { m: Member; actions: [string, string, string][] })
   );
 }
 
-export default async function Admin({ searchParams }: { searchParams: Promise<{ full?: string }> }) {
-  const { full } = await searchParams;
+export default async function Admin({ searchParams }: { searchParams: Promise<{ full?: string; approved?: string }> }) {
+  const { full, approved: justApproved } = await searchParams;
   const [viewer, members] = await within(Promise.all([
     requireAdmin(),
     db()<Member[]>`
@@ -108,6 +113,13 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
           <span style={{ width: `${Math.min(100, (approved.length / cap) * 100)}%` }} />
         </div>
 
+        {justApproved ? (
+          <div className="saved-line" style={{ marginBottom: 12 }}>
+            {justApproved === "mail"
+              ? "Approved. Their \"You're in\" email is on its way (about a minute)."
+              : "Approved. Their \"You're in\" email goes out with the next hourly run."}
+          </div>
+        ) : null}
         {full || (isFull && pending.length) ? (
           <div className="warn-line">All {cap} places are taken. Remove someone, or raise MAX_USERS on Vercel.</div>
         ) : null}

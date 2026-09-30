@@ -216,6 +216,8 @@ def main() -> None:
     ap.add_argument("--user", help="only this email (ignores the digest hour)")
     ap.add_argument("--date", help="pretend today is YYYY-MM-DD")
     ap.add_argument("--hour", type=int, help="pretend the target hour is H (IST)")
+    ap.add_argument("--accounts-only", action="store_true",
+                    help="only the account emails ('you're in', sign-ups waiting) - run right after an approval")
     args = ap.parse_args()
 
     now = datetime.now(IST)
@@ -233,6 +235,9 @@ def main() -> None:
                 print("no accounts yet - sending the single-user digest")
                 sys.argv = [sys.argv[0]] + (["--dry-run"] if args.dry_run else []) + (["--force"] if args.force else [])
                 sd.main()
+            return
+        if args.accounts_only:
+            account_emails(conn, args.dry_run)
             return
         if not args.user:
             account_emails(conn, args.dry_run)

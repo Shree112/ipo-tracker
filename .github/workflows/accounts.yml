@@ -1,0 +1,36 @@
+# Account emails, right away: the website starts this when the admin approves
+# someone, so the "You're in" email arrives in about a minute instead of at the
+# next hourly run (which still sends it as a fallback).
+#
+# Move this file to .github/workflows/accounts.yml
+name: accounts
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: accounts
+  cancel-in-progress: false
+
+jobs:
+  accounts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SITE_URL: ${{ secrets.SITE_URL }}
+      LINK_SECRET: ${{ secrets.LINK_SECRET }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      GMAIL_USER: ${{ secrets.GMAIL_USER }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      DIGEST_TO: ${{ secrets.DIGEST_TO }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Send account emails
+        run: python scripts/send_digests.py --accounts-only
