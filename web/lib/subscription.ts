@@ -7,8 +7,8 @@ import { db, within } from "./db";
 // scheduler drops most scheduled runs on a quiet repository, so on a closing
 // day the numbers could sit hours old. Here it runs on demand (the Refresh
 // button) and every 10 minutes during market hours (a Supabase cron calls
-// /api/cron/subscription). One fetch of InvestorGain's live report covers every
-// open issue. Same parsing and same table as sources/investorgain.py.
+// /api/cron/subscription). One fetch covers every open issue. Chittorgarh's
+// live bidding data first (freshest), InvestorGain's report as the fallback.
 
 const HOST = "https://www.investorgain.com";
 const REPORT_URL = process.env.IG_SUBSCRIPTION_URL || `${HOST}/report/ipo-subscription-live/333/`; // override only for tests
@@ -168,16 +168,153 @@ async function fetchReport(): Promise<string> {
   return html;
 }
 
+// ---------------------------------------------------------------- Chittorgarh
+// The primary source. Chittorgarh (InvestorGain's parent) publishes the
+// exchanges' bidding figures within minutes, while InvestorGain's report can
+// trail by half an hour - on a closing afternoon, when QIBs bid late, that
+// was 8x shown against 25x actual. Its live-bidding page loads this JSON
+// (robots.txt allows it). Rows join on issues.chittorgarh_id.
+const CG_API = "https://webnodejs.chittorgarh.com/cloud/report/data-read/21/1";
+const CG_COLS: Record<string, keyof Reading> = {
+  qibx: "qib_x",
+  sniix: "shni_x",
+  bniix: "bhni_x",
+  niix: "nii_x",
+  retailx: "rii_x",
+  employeex: "employee_x",
+  totalx: "total_x",
+};
+
+export type Reading = Omit<SubRow, "ig_id"> & { key: number };
+
+/** "30-Sep-2026 15:09" (IST) -> the instant. */
+export function cgTime(v: unknown): Date | null {
+  const m = strip(v).match(/(\d{1,2})-([A-Za-z]{3})-(\d{4})\s+(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const mon = MONTHS.indexOf(m[2].toLowerCase());
+  if (mon < 0) return null;
+  return new Date(Date.UTC(Number(m[3]), mon, Number(m[1]), Number(m[4]), Number(m[5])) - IST_MS);
+}
+
+export function parseChittorgarh(json: unknown): Reading[] {
+  const rows = (json as { reportTableData?: Record<string, unknown>[] })?.reportTableData;
+  if (!Array.isArray(rows)) throw new Error("reportTableData missing from Chittorgarh's live bidding data");
+  const out: Reading[] = [];
+  for (const row of rows) {
+    const key = Number(row["~id"]);
+    if (!key) continue;
+    const rec: Reading = {
+      key,
+      qib_x: null,
+      shni_x: null,
+      bhni_x: null,
+      nii_x: null,
+      rii_x: null,
+      employee_x: null,
+      total_x: null,
+      pe_ratio: null,
+      observed_at: null,
+      raw: {},
+    };
+    for (const [k, v] of Object.entries(row)) {
+      const nk = normKey(k);
+      const col = CG_COLS[nk];
+      if (col) {
+        (rec as Record<string, unknown>)[col] = cellNum(v);
+        rec.raw[k] = strip(v).trim();
+      } else if (nk === "applications") rec.raw[k] = strip(v).trim();
+      else if (nk === "subscriptionason") rec.observed_at = cgTime(v);
+    }
+    if (rec.total_x === null && rec.rii_x === null) continue;
+    out.push(rec);
+  }
+  return out;
+}
+
+async function fetchChittorgarh(): Promise<Reading[]> {
+  const ist = new Date(Date.now() + IST_MS);
+  const y = ist.getUTCFullYear();
+  const m = ist.getUTCMonth() + 1;
+  const fyStart = m >= 4 ? y : y - 1;
+  const url =
+    process.env.CG_SUBSCRIPTION_URL || // override only for tests
+    `${CG_API}/${m}/${y}/${fyStart}-${String((fyStart + 1) % 100).padStart(2, "0")}/0/mainboard/0`;
+  const r = await fetch(url, {
+    headers: {
+      "user-agent": process.env.SCRAPER_USER_AGENT || "ipo-tracker/0.1 (personal research project)",
+      accept: "application/json",
+    },
+    signal: AbortSignal.timeout(15000),
+    cache: "no-store",
+  });
+  if (!r.ok) throw new Error(`Chittorgarh answered ${r.status}`);
+  return parseChittorgarh(await r.json());
+}
+
+async function fetchInvestorGain(): Promise<Reading[]> {
+  return parseSubscription(await fetchReport()).map(({ ig_id, ...rest }) => ({ ...rest, key: ig_id }));
+}
+
 export type RefreshResult = {
   status: "updated" | "unchanged" | "recent" | "error";
   written: number;
   matched: number;
+  source?: string;
   message?: string;
 };
 
-/** Fetch the live report and store any readings that moved. Skips the fetch
- *  when another one ran in the last minute (the numbers can't be staler than
- *  that). Always clears the page cache so the viewer sees what's stored. */
+/** Store the readings that moved. One row per change: skipped when the four
+ *  headline numbers equal the last reading from the same source. */
+async function store(source: "chittorgarh" | "investorgain", rows: Reading[]) {
+  const sql = db();
+  const keys = rows.map((r) => r.key);
+  const issues = await within(
+    source === "chittorgarh"
+      ? sql<{ id: number; key: number }[]>`SELECT id, chittorgarh_id AS key FROM issues WHERE chittorgarh_id = ANY(${keys}::int[])`
+      : sql<{ id: number; key: number }[]>`SELECT id, investorgain_id AS key FROM issues WHERE investorgain_id = ANY(${keys}::int[])`,
+    6000,
+    "subscription issues",
+  );
+  const issueOf = new Map(issues.map((r) => [Number(r.key), Number(r.id)]));
+  const fetchedAt = new Date(Math.floor(Date.now() / 60_000) * 60_000);
+  let matched = 0;
+  let written = 0;
+  for (const s of rows) {
+    const issueId = issueOf.get(s.key);
+    if (issueId === undefined) continue; // SME, or not on our calendar
+    matched++;
+    const res = await within(
+      sql`
+        WITH last AS (
+          SELECT qib_x, nii_x, rii_x, total_x FROM subscription
+          WHERE issue_id = ${issueId} AND source = ${source} ORDER BY observed_at DESC LIMIT 1)
+        INSERT INTO subscription (issue_id, observed_at, source, qib_x, nii_x, rii_x, employee_x, total_x, shni_x, bhni_x, raw)
+        SELECT ${issueId}, ${s.observed_at ?? fetchedAt}, ${source}, ${s.qib_x}, ${s.nii_x}, ${s.rii_x},
+               ${s.employee_x}, ${s.total_x}, ${s.shni_x}, ${s.bhni_x}, ${sql.json({ ...s.raw, via: "web" })}
+        WHERE NOT EXISTS (
+          SELECT 1 FROM last
+          WHERE last.qib_x IS NOT DISTINCT FROM ${s.qib_x}::numeric AND last.nii_x IS NOT DISTINCT FROM ${s.nii_x}::numeric
+            AND last.rii_x IS NOT DISTINCT FROM ${s.rii_x}::numeric AND last.total_x IS NOT DISTINCT FROM ${s.total_x}::numeric)
+        ON CONFLICT (issue_id, source, observed_at) DO NOTHING`,
+      6000,
+      "subscription write",
+    );
+    written += res.count;
+    if (s.pe_ratio !== null) {
+      await within(
+        sql`UPDATE issues SET pe_ratio = ${s.pe_ratio} WHERE id = ${issueId} AND pe_ratio IS DISTINCT FROM ${s.pe_ratio}::numeric`,
+        6000,
+        "pe",
+      );
+    }
+  }
+  return { matched, written, seen: rows.length };
+}
+
+/** Fetch the live figures and store any that moved: Chittorgarh first,
+ *  InvestorGain if Chittorgarh can't be read. Skips the fetch when another one
+ *  ran in the last minute. Always clears the page cache so the viewer sees
+ *  what's stored. */
 export async function refreshSubscription(trigger: "button" | "cron"): Promise<RefreshResult> {
   const sql = db();
   const [recent] = await within(
@@ -196,65 +333,37 @@ export async function refreshSubscription(trigger: "button" | "cron"): Promise<R
     6000,
     "subscription run",
   );
-  let seen = 0;
-  let written = 0;
-  let matched = 0;
-  try {
-    const rows = parseSubscription(await fetchReport());
-    seen = rows.length;
-    const issues = await within(
-      sql<{ id: number; investorgain_id: number }[]>`
-        SELECT id, investorgain_id FROM issues WHERE investorgain_id = ANY(${rows.map((r) => r.ig_id)}::int[])`,
-      6000,
-      "subscription issues",
-    );
-    const issueOf = new Map(issues.map((r) => [Number(r.investorgain_id), Number(r.id)]));
-    const fetchedAt = new Date(Math.floor(Date.now() / 60_000) * 60_000);
-    for (const s of rows) {
-      const issueId = issueOf.get(s.ig_id);
-      if (issueId === undefined) continue; // SME, or not on our calendar
-      matched++;
-      // One row per change: skip when the four headline numbers match the last reading.
-      const res = await within(
-        sql`
-          WITH last AS (
-            SELECT qib_x, nii_x, rii_x, total_x FROM subscription
-            WHERE issue_id = ${issueId} AND source = 'investorgain' ORDER BY observed_at DESC LIMIT 1)
-          INSERT INTO subscription (issue_id, observed_at, source, qib_x, nii_x, rii_x, employee_x, total_x, shni_x, bhni_x, raw)
-          SELECT ${issueId}, ${s.observed_at ?? fetchedAt}, 'investorgain', ${s.qib_x}, ${s.nii_x}, ${s.rii_x},
-                 ${s.employee_x}, ${s.total_x}, ${s.shni_x}, ${s.bhni_x}, ${sql.json({ ...s.raw, site_updated: null, via: "web" })}
-          WHERE NOT EXISTS (
-            SELECT 1 FROM last
-            WHERE last.qib_x IS NOT DISTINCT FROM ${s.qib_x}::numeric AND last.nii_x IS NOT DISTINCT FROM ${s.nii_x}::numeric
-              AND last.rii_x IS NOT DISTINCT FROM ${s.rii_x}::numeric AND last.total_x IS NOT DISTINCT FROM ${s.total_x}::numeric)
-          ON CONFLICT (issue_id, source, observed_at) DO NOTHING`,
-        6000,
-        "subscription write",
-      );
-      written += res.count;
-      if (s.pe_ratio !== null) {
-        await within(sql`UPDATE issues SET pe_ratio = ${s.pe_ratio} WHERE id = ${issueId} AND pe_ratio IS DISTINCT FROM ${s.pe_ratio}::numeric`, 6000, "pe");
+  const notes: string[] = [];
+  let totals = { matched: 0, written: 0, seen: 0 };
+  let used: "chittorgarh" | "investorgain" | null = null;
+  for (const [source, fetcher] of [
+    ["chittorgarh", fetchChittorgarh],
+    ["investorgain", fetchInvestorGain],
+  ] as const) {
+    try {
+      const got = await store(source, await fetcher());
+      totals = got;
+      if (got.matched) {
+        used = source;
+        break;
       }
+      notes.push(`${source}: no mainboard issue matched`);
+    } catch (e) {
+      notes.push(`${source}: ${e instanceof Error ? e.message : String(e)}`);
     }
-    await sql`
-      UPDATE scrape_run SET finished_at = now(), status = ${matched ? "ok" : "empty"},
-             rows_seen = ${seen}, rows_written = ${written},
-             message = ${`web:${trigger}` + (matched ? "" : " - no mainboard issue on the report")}
-      WHERE id = ${run.id}`.catch(() => undefined);
-    revalidateTag("issues");
-    return { status: written ? "updated" : "unchanged", written, matched };
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    await sql`
-      UPDATE scrape_run SET finished_at = now(), status = 'error', rows_seen = ${seen}, rows_written = ${written},
-             message = ${`web:${trigger}: ${message}`.slice(0, 500)}
-      WHERE id = ${run.id}`.catch(() => undefined);
-    if (written) revalidateTag("issues");
-    return { status: "error", written, matched, message };
   }
+  const message = [`web:${trigger}`, used ? `via ${used}` : "", ...notes].filter(Boolean).join(" | ").slice(0, 500);
+  const status = used ? "ok" : notes.some((n) => !n.endsWith("matched")) ? "error" : "empty";
+  await sql`
+    UPDATE scrape_run SET finished_at = now(), status = ${status},
+           rows_seen = ${totals.seen}, rows_written = ${totals.written}, message = ${message}
+    WHERE id = ${run.id}`.catch(() => undefined);
+  revalidateTag("issues");
+  if (status === "error") return { status: "error", written: 0, matched: 0, message };
+  return { status: totals.written ? "updated" : "unchanged", written: totals.written, matched: totals.matched, source: used ?? undefined };
 }
 
-/** When the site last checked InvestorGain (any path: button, cron, Python). */
+/** When the site last checked the live figures (any path: button, cron, Python). */
 export async function lastSubscriptionCheck(): Promise<Date | null> {
   const [r] = await within(
     db()<{ at: Date | null }[]>`
