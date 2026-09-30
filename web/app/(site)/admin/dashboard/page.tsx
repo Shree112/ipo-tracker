@@ -1,4 +1,5 @@
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import AdminTabs from "@/components/AdminTabs";
 import DayBars from "@/components/DayBars";
 import { dashboardData } from "@/lib/dashboard";
@@ -33,8 +34,9 @@ async function connectTelegram() {
   "use server";
   const v = await getViewer();
   if (!v?.isAdmin) return;
-  await setTelegramWebhook();
+  const r = await setTelegramWebhook();
   revalidatePath("/admin/dashboard");
+  redirect(`/admin/dashboard?tg=${encodeURIComponent(r.message)}`);
 }
 
 function Tile({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
@@ -47,7 +49,8 @@ function Tile({ label, value, sub }: { label: string; value: string | number; su
   );
 }
 
-export default async function Dashboard() {
+export default async function Dashboard({ searchParams }: { searchParams: Promise<{ tg?: string }> }) {
+  const { tg: tgResult } = await searchParams;
   const [viewer, d, tg] = await Promise.all([requireAdmin(), dashboardData(), telegramStatus()]);
   const count = (s: string) => d.members.find((m) => m.status === s)?.n ?? 0;
   const approved = count("approved");
@@ -211,9 +214,13 @@ export default async function Dashboard() {
                   Connect webhook
                 </button>
               </form>
-            ) : (
-              <div className="xs muted">{tg.detail}</div>
-            )}
+            ) : null}
+            {tg.detail ? <div className="xs muted">{tg.detail}</div> : null}
+            {tgResult && tg.label !== "Connected" ? (
+              <div className="xs" style={{ color: "var(--down)", marginTop: 6 }}>
+                {tgResult.slice(0, 200)}
+              </div>
+            ) : null}
           </div>
         </div>
       </section>

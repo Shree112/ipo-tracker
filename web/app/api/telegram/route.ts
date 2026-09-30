@@ -5,7 +5,7 @@ import { sendMessage } from "@/lib/telegram";
 // Telegram calls this for every message sent to the bot. It only handles
 // linking (/start <code>) and unlinking (/stop); alerts go out from the jobs.
 export async function POST(req: NextRequest) {
-  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  const secret = (process.env.TELEGRAM_WEBHOOK_SECRET ?? "").trim();
   if (!secret || req.headers.get("x-telegram-bot-api-secret-token") !== secret) {
     return new NextResponse("forbidden", { status: 403 });
   }
