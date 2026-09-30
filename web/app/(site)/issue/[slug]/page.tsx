@@ -27,7 +27,7 @@ import OpenOnHash from "@/components/OpenOnHash";
 import Chatter from "@/components/Chatter";
 import AboutCompany from "@/components/AboutCompany";
 import AskProspectus from "@/components/AskProspectus";
-import { askReady, prospectusStatus } from "@/lib/ask";
+import { askReady, prospectusStatus, webReady } from "@/lib/ask";
 import AllotmentCard from "@/components/AllotmentCard";
 import { BSE_STATUS, registrarLink } from "@/lib/registrars";
 import { lotTable } from "@/lib/lots";
@@ -483,15 +483,16 @@ export default async function IssuePage({
             {askReady() ? (
               <Fold
                 id="ask"
-                title="Ask the prospectus"
+                title={webReady() ? "Ask about this IPO" : "Ask the prospectus"}
                 summary={
                   <span className="chip">
-                    {rhpDoc?.status === "ok" ? `${rhpDoc.pages} pages loaded · answers cite pages` : "prospectus not loaded yet"}
+                    {rhpDoc?.status === "ok" ? `${rhpDoc.pages} prospectus pages` : "prospectus not loaded yet"}
+                    {webReady() ? " + web search" : ""}
                   </span>
                 }
               >
-                {rhpDoc?.status === "ok" ? (
-                  <AskProspectus slug={i.slug} rhpUrl={i.rhp_url} pages={rhpDoc.pages} />
+                {rhpDoc?.status === "ok" || webReady() ? (
+                  <AskProspectus slug={i.slug} rhpUrl={i.rhp_url} pages={rhpDoc?.status === "ok" ? rhpDoc.pages : null} web={webReady()} />
                 ) : (
                   <p className="small muted">
                     The prospectus for this IPO hasn&apos;t been loaded yet (it&apos;s picked up twice a day once the RHP is
@@ -541,7 +542,7 @@ export default async function IssuePage({
           </>
         ) : (
           <>
-            <LockedFold id="ask" title="Ask the prospectus" blurb="Ask plain-English questions about the red herring prospectus and get answers with page numbers." next={here} />
+            <LockedFold id="ask" title="Ask about this IPO" blurb="Ask plain-English questions and get answers from the prospectus and the web, with sources." next={here} />
             <LockedFold id="chatter" title="What investors are saying" blurb="An AI summary of what people on Reddit and IPO Watch are saying about this IPO." next={here} />
             <LockedFold id="anchor" title="Anchor book" blurb="Who bought in the anchor round, how much, and how much went to mutual funds." next={here} />
             <LockedFold id="financials" title="Financials & valuation" blurb="Income, profit, ROE, debt and valuation from the offer document." next={here} />

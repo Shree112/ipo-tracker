@@ -9,13 +9,24 @@ const SUGGESTED = [
   "Who are the promoters and how much do they own?",
   "Is there any major litigation?",
   "How much debt does the company have?",
+  "How is the industry doing right now?",
 ];
 
 type QA = { q: string; r: AskResult };
 
 // Ask questions of this IPO's prospectus. Answers come only from the passages
 // found, with page numbers so they can be checked in the PDF.
-export default function AskProspectus({ slug, rhpUrl, pages }: { slug: string; rhpUrl: string | null; pages: number | null }) {
+export default function AskProspectus({
+  slug,
+  rhpUrl,
+  pages,
+  web,
+}: {
+  slug: string;
+  rhpUrl: string | null;
+  pages: number | null;
+  web: boolean;
+}) {
   const [q, setQ] = useState("");
   const [log, setLog] = useState<QA[]>([]);
   const [pending, start] = useTransition();
@@ -40,7 +51,7 @@ export default function AskProspectus({ slug, rhpUrl, pages }: { slug: string; r
           className="input"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Ask anything about this IPO's prospectus…"
+          placeholder={web ? "Ask anything about this IPO, the company or its industry…" : "Ask anything about this IPO's prospectus…"}
           maxLength={300}
           aria-label="Question"
         />
@@ -55,23 +66,37 @@ export default function AskProspectus({ slug, rhpUrl, pages }: { slug: string; r
           </button>
         ))}
       </div>
-      {pending ? <p className="small muted" style={{ marginTop: 14 }}>Searching {pages ? `${pages} pages` : "the prospectus"}…</p> : null}
+      {pending ? (
+        <p className="small muted" style={{ marginTop: 14 }}>
+          Searching {pages ? `${pages} prospectus pages` : "the prospectus"}
+          {web ? " and the web" : ""}…
+        </p>
+      ) : null}
       {log.map((x, k) => (
         <div key={k} className="ask-qa">
           <div className="ask-q">{x.q}</div>
           {x.r.ok ? (
             <>
               <div className="ask-a">{x.r.answer}</div>
-              <div className="xs muted" style={{ marginTop: 6 }}>
-                From pages {x.r.pages.join(", ")}
-                {rhpUrl ? (
-                  <>
-                    {" · "}
-                    <a className="link" href={rhpUrl} target="_blank" rel="noreferrer">
-                      open the prospectus ↗
-                    </a>
-                  </>
+              <div className="xs muted ask-src">
+                {x.r.pages.length ? (
+                  <span>
+                    Prospectus pages {x.r.pages.join(", ")}
+                    {rhpUrl ? (
+                      <>
+                        {" · "}
+                        <a className="link" href={rhpUrl} target="_blank" rel="noreferrer">
+                          open it ↗
+                        </a>
+                      </>
+                    ) : null}
+                  </span>
                 ) : null}
+                {x.r.web.map((w) => (
+                  <a key={w.n} className="link" href={w.url} target="_blank" rel="noreferrer">
+                    [W{w.n}] {w.title.length > 70 ? `${w.title.slice(0, 67)}…` : w.title} ↗
+                  </a>
+                ))}
               </div>
             </>
           ) : (
@@ -80,8 +105,8 @@ export default function AskProspectus({ slug, rhpUrl, pages }: { slug: string; r
         </div>
       ))}
       <p className="xs muted" style={{ marginTop: 14 }}>
-        Answers are written by an open-source AI model from the prospectus text and can be wrong or incomplete. Check the
-        cited pages before relying on anything. Not investment advice.
+        Answers are written by an open-source AI model from the prospectus{web ? " and web search results" : ""} and can be
+        wrong or incomplete. Check the cited sources before relying on anything. Not investment advice.
       </p>
     </div>
   );
