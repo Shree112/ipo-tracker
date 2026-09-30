@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { supabaseEnv, supabaseServer } from "@/lib/supabase";
 import { maxUsers } from "@/lib/viewer";
+import LogoMark from "@/components/LogoMark";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Sign in" };
@@ -43,7 +44,7 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<{
     <main className="wrap">
       <div className="landing">
         <div className="logo" style={{ marginBottom: 32 }}>
-          <span className="logo-mark" aria-hidden>IC</span>
+          <LogoMark size={30} />
           <span>IPO Copilot</span>
         </div>
         <h1 className="landing-title">

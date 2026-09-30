@@ -93,5 +93,8 @@ export const config = {
   // themselves), /api/* (the Telegram webhook checks its own secret), the
   // public privacy and terms pages, /act/<token> (the email buttons carry their own signature,
   // so they work on a phone that has never signed in), and static assets.
-  matcher: ["/((?!api/|auth/|act/|privacy$|terms$|_next/static|_next/image|favicon.ico|robots.txt).*)"],
+  // static files (icons, the app manifest) skip the sign-in check entirely
+  matcher: [
+    "/((?!api/|auth/|act/|privacy$|terms$|_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|icon-192.png|icon-512.png|manifest.webmanifest|robots.txt).*)",
+  ],
 };

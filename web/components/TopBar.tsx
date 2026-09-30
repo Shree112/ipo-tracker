@@ -3,6 +3,7 @@ import { fmtDate, todayIST } from "@/lib/format";
 import type { Viewer } from "@/lib/viewer";
 import { NavLink, SignInLink } from "./NavLink";
 import ThemeToggle from "./ThemeToggle";
+import LogoMark from "./LogoMark";
 
 export default function TopBar({ viewer }: { viewer?: Viewer | null }) {
   const approved = viewer?.status === "approved";
@@ -11,7 +12,7 @@ export default function TopBar({ viewer }: { viewer?: Viewer | null }) {
     <header className="site-header">
       <div className="wrap">
         <Link href="/" className="logo" aria-label="IPO Copilot home">
-          <span className="logo-mark" aria-hidden>IC</span>
+          <LogoMark size={30} />
           <span>IPO Copilot</span>
         </Link>
         <nav className="site-nav">

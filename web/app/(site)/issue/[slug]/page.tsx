@@ -27,6 +27,7 @@ import OpenOnHash from "@/components/OpenOnHash";
 import Chatter from "@/components/Chatter";
 import AboutCompany from "@/components/AboutCompany";
 import AskProspectus from "@/components/AskProspectus";
+import AskCard from "@/components/AskCard";
 import { askReady, prospectusStatus, webReady } from "@/lib/ask";
 import AllotmentCard from "@/components/AllotmentCard";
 import { BSE_STATUS, registrarLink } from "@/lib/registrars";
@@ -377,8 +378,38 @@ export default async function IssuePage({
 
         <AboutCompany detail={detail} shortName={shortName} sourceUrl={i.investorgain_url} />
 
+        {askReady() ? (
+          <AskCard
+            name={shortName}
+            member={member}
+            next={here}
+            sources={[rhpDoc?.status === "ok" ? `${rhpDoc.pages}-page prospectus` : null, webReady() ? "live web search" : null]
+              .filter(Boolean)
+              .join(" + ")}
+          >
+            {member && (rhpDoc?.status === "ok" || webReady()) ? (
+              <AskProspectus slug={i.slug} rhpUrl={i.rhp_url} pages={rhpDoc?.status === "ok" ? rhpDoc.pages : null} web={webReady()} />
+            ) : member ? (
+              <p className="small muted">
+                The prospectus for this IPO hasn&apos;t been loaded yet (it&apos;s picked up twice a day once the RHP is
+                published){i.rhp_url ? ". You can still read it directly: " : "."}
+                {i.rhp_url ? (
+                  <a className="link" href={i.rhp_url} target="_blank" rel="noreferrer">
+                    open the prospectus ↗
+                  </a>
+                ) : null}
+              </p>
+            ) : null}
+          </AskCard>
+        ) : null}
+
         <nav className="subnav" aria-label="On this page">
           <OpenOnHash />
+          {askReady() ? (
+            <a href="#ask" className="subnav-ai">
+              ✦ Ask AI
+            </a>
+          ) : null}
           <a href="#gmp">GMP</a>
           <a href="#subscription">Subscription</a>
           <a href="#chatter">Chatter</a>
@@ -493,32 +524,6 @@ export default async function IssuePage({
 
         {member ? (
           <>
-            {askReady() ? (
-              <Fold
-                id="ask"
-                title={webReady() ? "Ask about this IPO" : "Ask the prospectus"}
-                summary={
-                  <span className="chip">
-                    {rhpDoc?.status === "ok" ? `${rhpDoc.pages} prospectus pages` : "prospectus not loaded yet"}
-                    {webReady() ? " + web search" : ""}
-                  </span>
-                }
-              >
-                {rhpDoc?.status === "ok" || webReady() ? (
-                  <AskProspectus slug={i.slug} rhpUrl={i.rhp_url} pages={rhpDoc?.status === "ok" ? rhpDoc.pages : null} web={webReady()} />
-                ) : (
-                  <p className="small muted">
-                    The prospectus for this IPO hasn&apos;t been loaded yet (it&apos;s picked up twice a day once the RHP is
-                    published){i.rhp_url ? ". You can still read it directly: " : "."}
-                    {i.rhp_url ? (
-                      <a className="link" href={i.rhp_url} target="_blank" rel="noreferrer">
-                        open the prospectus ↗
-                      </a>
-                    ) : null}
-                  </p>
-                )}
-              </Fold>
-            ) : null}
             <Chatter data={chatter} today={today} />
             <AnchorBook detail={detail} issueSizeCr={i.issue_size_cr} />
             <Financials detail={detail} />
@@ -555,7 +560,6 @@ export default async function IssuePage({
           </>
         ) : (
           <>
-            <LockedFold id="ask" title="Ask about this IPO" blurb="Ask plain-English questions and get answers from the prospectus and the web, with sources." next={here} />
             <LockedFold id="chatter" title="What investors are saying" blurb="An AI summary of what people on Reddit and IPO Watch are saying about this IPO." next={here} />
             <LockedFold id="anchor" title="Anchor book" blurb="Who bought in the anchor round, how much, and how much went to mutual funds." next={here} />
             <LockedFold id="financials" title="Financials & valuation" blurb="Income, profit, ROE, debt and valuation from the offer document." next={here} />

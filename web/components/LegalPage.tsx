@@ -1,4 +1,5 @@
 import Link from "next/link";
+import LogoMark from "@/components/LogoMark";
 
 // Shared shell for /privacy and /terms: public pages (no sign-in), linked from
 // the sign-in page and from the Google consent screen.
@@ -7,7 +8,7 @@ export default function LegalPage({ title, updated, children }: { title: string;
     <main className="wrap">
       <article className="legal">
         <Link href="/signin" className="logo" style={{ marginBottom: 32 }}>
-          <span className="logo-mark" aria-hidden>IC</span>
+          <LogoMark size={30} />
           <span>IPO Copilot</span>
         </Link>
         <h1>{title}</h1>

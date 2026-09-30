@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { setAllotment, setDecision } from "@/lib/queries";
 import { logEvent } from "@/lib/events";
 import type { LinkPayload } from "@/lib/links";
+import LogoMark from "@/components/LogoMark";
 
 /** Whose decision this is: the account in the link, or the admin for old links. */
 async function ownerOf(p: LinkPayload): Promise<string | null> {
@@ -50,7 +51,7 @@ export default async function ActPage({
     <main className="wrap">
       <div className="center-card">
         <div className="logo" style={{ marginBottom: 24 }}>
-          <span className="logo-mark" aria-hidden>IC</span>
+          <LogoMark size={30} />
           <span>IPO Copilot</span>
         </div>
         <div className="card" style={{ padding: 24, display: "grid", gap: 14 }}>
