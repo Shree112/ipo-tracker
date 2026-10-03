@@ -485,6 +485,7 @@ def light_once(conn, today: date) -> str:
             iw_rows = iw.parse_live(base.get(iw.LIVE_URL), today)
         except (iw.ParseError, base.FetchError) as exc:
             iw_rows = []
+            log.error = f"{type(exc).__name__}: {exc}"
             notes.append(f"IPO Watch failed: {exc}")
         write_ipowatch(conn, iw_rows, [k for k in known if k["board"] == "mainboard"], log)
         notes.append(f"IPO Watch {log.written} new")
