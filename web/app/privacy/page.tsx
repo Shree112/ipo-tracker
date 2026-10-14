@@ -7,7 +7,7 @@ export default function Privacy() {
   return (
     <LegalPage title="Privacy policy" updated="28 September 2026">
       <p>
-        IPO Copilot is a small, invite-only tool that sends a daily email about Indian mainboard IPOs. This page
+        IPO Copilot is a small tool, limited to a few dozen members, that sends a daily email about Indian mainboard IPOs. This page
         explains what it stores about you and why. It is run by one person, reachable at{" "}
         <a className="link" href={`mailto:${email}`}>{email}</a>.
       </p>

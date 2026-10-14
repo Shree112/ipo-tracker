@@ -7,7 +7,7 @@ export default function Terms() {
   return (
     <LegalPage title="Terms of use" updated="28 September 2026">
       <p>
-        IPO Copilot is a free, personal, invite-only tool. By signing in you agree to the points below. Questions go to{" "}
+        IPO Copilot is a free, personal tool with a limited number of places. By signing in you agree to the points below. Questions go to{" "}
         <a className="link" href={`mailto:${email}`}>{email}</a>.
       </p>
       <h2>Information only, not advice</h2>

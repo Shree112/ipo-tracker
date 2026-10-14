@@ -103,7 +103,7 @@ export default async function IssuePage({
   ]);
   if (!data) notFound();
   if (src === "email" || src === "tg") logEvent(src === "email" ? "email_click" : "tg_click", viewer?.id ?? null, slug);
-  // Signed-out visitors (and accounts still waiting for approval) get the
+  // Signed-out visitors (and waitlisted accounts) get the
   // headline numbers, the GMP chart and subscription; the research sections
   // and anything personal need an approved account.
   const member = viewer?.status === "approved";
@@ -198,7 +198,7 @@ export default async function IssuePage({
             <DecisionButtons slug={i.slug} status={i.status} note={i.note} />
           ) : viewer ? (
             <span className="badge amber">
-              <span className="dot" aria-hidden /> Account waiting for approval
+              <span className="dot" aria-hidden /> On the waitlist
             </span>
           ) : (
             <Link href={`/signin?next=${encodeURIComponent(here)}`} className="btn primary">

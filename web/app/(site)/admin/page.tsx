@@ -3,7 +3,7 @@ import AdminTabs from "@/components/AdminTabs";
 import { revalidatePath } from "next/cache";
 import { db, within } from "@/lib/db";
 import { fmtDate } from "@/lib/format";
-import { getViewer, maxUsers, requireAdmin } from "@/lib/viewer";
+import { admitWaitlist, getViewer, maxUsers, requireAdmin } from "@/lib/viewer";
 import { startWorkflow } from "@/lib/github";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +39,9 @@ async function decide(fd: FormData) {
     redirect(started.ok ? "/admin?approved=mail" : "/admin?approved=later");
   } else {
     await sql`UPDATE app_users SET status = 'rejected', decided_at = now() WHERE user_id = ${id}::uuid AND NOT is_admin`;
+    // a place may have freed up: the longest-waiting person gets it
+    const admitted = await admitWaitlist().catch(() => 0);
+    if (admitted) await startWorkflow("accounts").catch(() => undefined);
   }
   revalidatePath("/admin");
   redirect("/admin");
@@ -104,7 +107,8 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
             <div className="eyebrow">Admin</div>
             <h1 style={{ marginTop: 10 }}>Members</h1>
             <p>
-              {approved.length} of {cap} places taken{pending.length ? ` · ${pending.length} waiting` : ""}.
+              {approved.length} of {cap} places taken{pending.length ? ` · ${pending.length} on the waitlist` : ""}. Sign-ups
+              are automatic until the places run out.
             </p>
           </div>
           <AdminTabs current="members" pending={pending.length} />
@@ -121,12 +125,15 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
           </div>
         ) : null}
         {full || (isFull && pending.length) ? (
-          <div className="warn-line">All {cap} places are taken. Remove someone, or raise MAX_USERS on Vercel.</div>
+          <div className="warn-line">
+            All {cap} places are taken, so new sign-ups go on the waitlist. Removing someone lets the longest-waiting
+            person in; raise MAX_USERS on Vercel for more places.
+          </div>
         ) : null}
 
         <section className="card section">
           <div className="card-head">
-            <h2>Waiting for approval</h2>
+            <h2>Waitlist</h2>
             <span className="sub">{pending.length || "none"}</span>
           </div>
           {pending.length ? (
@@ -136,12 +143,15 @@ export default async function Admin({ searchParams }: { searchParams: Promise<{ 
                 m={m}
                 actions={[
                   ["rejected", "Decline", "ghost"],
-                  ["approved", "Approve", "primary"],
+                  ["approved", "Let in now", "primary"],
                 ]}
               />
             ))
           ) : (
-            <p className="small muted">No one right now. New sign-ups show up here, and you get an email within the hour.</p>
+            <p className="small muted">
+              Empty. People only land here once all {cap} places are taken; they get in automatically, oldest first,
+              when a place frees up.
+            </p>
           )}
         </section>
 

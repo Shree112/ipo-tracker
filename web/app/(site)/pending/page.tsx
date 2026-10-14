@@ -1,13 +1,18 @@
 import { redirect } from "next/navigation";
-import { getViewer } from "@/lib/viewer";
+import { ensureAccount, getViewer, maxUsers } from "@/lib/viewer";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Waiting for approval" };
+export const metadata = { title: "Waitlist" };
 
 export default async function Pending() {
   const v = await getViewer();
   if (!v) redirect("/signin");
   if (v.status === "approved") redirect("/");
+  if (v.status === "pending") {
+    // a place may have opened since they signed up
+    const now = await ensureAccount(v.id, v.email, v.name).catch(() => null);
+    if (now?.status === "approved") redirect("/");
+  }
   const first = v.name?.split(" ")[0];
   return (
     <>
@@ -25,12 +30,13 @@ export default async function Pending() {
             ) : (
               <>
                 <span className="badge amber" style={{ justifySelf: "start" }}>
-                  <span className="dot" aria-hidden /> Waiting for approval
+                  <span className="dot" aria-hidden /> On the waitlist
                 </span>
-                <h1 style={{ fontSize: 22 }}>Thanks{first ? `, ${first}` : ""}. You&apos;re on the list.</h1>
+                <h1 style={{ fontSize: 22 }}>Thanks{first ? `, ${first}` : ""}. We&apos;re full right now.</h1>
                 <p className="muted">
-                  Accounts are approved by hand. You&apos;ll get an email at <b style={{ color: "var(--ink)" }}>{v.email}</b>{" "}
-                  once you&apos;re in, and your first digest the next morning an IPO matches.
+                  IPO Copilot is limited to {maxUsers()} members and every place is taken. You&apos;re on the waitlist:
+                  when a place opens you get in automatically, oldest sign-up first, and we email{" "}
+                  <b style={{ color: "var(--ink)" }}>{v.email}</b>.
                 </p>
               </>
             )}

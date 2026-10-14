@@ -130,7 +130,7 @@ def _note_html(title: str, body_html: str, cta: str, url: str) -> str:
 
 
 def account_emails(conn, dry_run: bool) -> None:
-    """'You're in' for newly approved people; 'N waiting' for the admin."""
+    """'You're in' for new members; 'N on the waitlist' for the admin."""
     site = sd.SITE_URL
     with conn.cursor() as cur:
         cur.execute("""SELECT u.user_id::text AS user_id, u.email, u.name, COALESCE(r.email_to, u.email) AS to_addr,
@@ -148,10 +148,10 @@ def account_emails(conn, dry_run: bool) -> None:
         first = (u["name"] or "").split(" ")[0] or "there"
         h = int(u["digest_hour"])
         when = f"{(h - 1) % 12 + 1}{'am' if h < 12 else 'pm'}"
-        body = (f"Hi {html.escape(first)}, your account is approved. Your digest arrives around {when} IST on days "
+        body = (f"Hi {html.escape(first)}, your IPO Copilot account is ready. Your digest arrives around {when} IST on days "
                 f"when an IPO matches your alerts. It starts with GMP above 10%; you can change the rules, the time "
                 f"and the address it goes to in your alert settings.")
-        text = (f"Hi {first}, your account is approved. Your digest arrives around {when} IST on days when an IPO "
+        text = (f"Hi {first}, your IPO Copilot account is ready. Your digest arrives around {when} IST on days when an IPO "
                 f"matches your alerts.\n\nAlert settings: {site}/settings\n")
         if dry_run:
             print(f"  would send welcome to {u['to_addr']}")
@@ -167,14 +167,14 @@ def account_emails(conn, dry_run: bool) -> None:
         names = "".join(f"<li>{html.escape(w['name'] or w['email'])} &middot; {html.escape(w['email'])}</li>"
                         for w in waiting)
         n = len(waiting)
-        subj = f"{n} new sign-up{'s' if n != 1 else ''} waiting: IPO Copilot"
+        subj = f"{n} new sign-up{'s' if n != 1 else ''} on the waitlist: IPO Copilot"
         body = f'<ul style="padding-left:18px;margin:0 0 6px;">{names}</ul>'
         text = "\n".join(f"- {w['name'] or ''} {w['email']}" for w in waiting) + f"\n\nReview: {site}/admin\n"
         if dry_run:
             print(f"  would tell {admins} about {n} sign-up(s)")
             return
         for a in admins:
-            send_email(a, subj, _note_html(f"{n} waiting for approval", body, "Review sign-ups",
+            send_email(a, subj, _note_html(f"All places taken: {n} joined the waitlist", body, "Open members",
                                            f"{site}/admin" if site else ""), text)
         with conn.cursor() as cur:
             cur.execute("UPDATE app_users SET admin_notified_at = now() WHERE user_id = ANY(%s::uuid[])",

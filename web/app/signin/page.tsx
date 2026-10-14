@@ -85,7 +85,7 @@ export default async function SignIn({ searchParams }: { searchParams: Promise<{
         )}
 
         <p className="xs muted" style={{ marginTop: 18, maxWidth: 460 }}>
-          Invite-only for now: new accounts are approved by hand, up to {maxUsers()} members. GMP is an unofficial
+          Free, for the first {maxUsers()} members; after that new sign-ups join a waitlist. GMP is an unofficial
           grey-market quote and nothing here is investment advice.
         </p>
         <p className="xs landing-links">

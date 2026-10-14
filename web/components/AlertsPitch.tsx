@@ -42,7 +42,7 @@ export default function AlertsPitch({
     <section className="pitch card">
       <div className="pitch-copy">
         <span className="badge green">
-          <span className="dot" aria-hidden /> Free · invite-only
+          <span className="dot" aria-hidden /> Free · limited places
         </span>
         <h2 className="pitch-title">
           Stop checking GMP <em>every morning.</em>

@@ -70,7 +70,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ w
   const counts = { mainboard: liveCount(sme ? otherIssues : issues, today), sme: liveCount(sme ? issues : otherIssues, today) };
   // The list is public; the radar, alerts and Applied/Skip are for approved members.
   const member = viewer?.status === "approved";
-  // first sign-in after approval: pick a starting set of alerts
+  // first sign-in: pick a starting set of alerts
   if (member && rules && !rules.onboarded_at) redirect("/welcome");
   const matches = member ? allMatches : new Map<number, Match>();
   const rows = issues.map((i) => toRow(i, today, matches.get(i.id)));
@@ -160,7 +160,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ w
           <AlertsPitch example={example} />
         ) : !member ? (
           <div className="warn-line" style={{ marginBottom: 16 }}>
-            Your account is waiting for approval. Once you&apos;re in, you&apos;ll set your alerts and get the daily digest.
+            IPO Copilot is full right now and you&apos;re on the waitlist. You&apos;ll get an email when a place opens.
           </div>
         ) : null}
         {rows.length ? (

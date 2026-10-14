@@ -356,71 +356,102 @@ def _window(text: str, today: date) -> tuple[date | None, date | None]:
 
 
 STATUS_CODES = {"U": "Upcoming", "O": "Open", "C": "Closed", "L": "Listed", "A": "Allotment"}
-
-
-def _live_table(soup):
-    """The live GMP table, found by its header. Two layouts seen:
-    - until Oct 2026: 'IPO Name | IPO GMP | ... | Status' (mainboard table
-      first, SME second)
-    - since Oct 2026: one combined table 'Company | GMP* | Trend | Price Band |
-      Est. Gain | Date'; the Company cell reads 'Name (O) Mainboard'."""
-    for table in soup.find_all("table"):
-        first = table.find("tr")
-        head = [_text(c).lower() for c in first.find_all(["th", "td"])] if first else []
-        if head and head[0] in ("ipo name", "company", "ipo", "ipo company") and any("gmp" in h for h in head):
-            return table, head
-    raise ParseError("live GMP table not found (header 'IPO Name'/'Company' + GMP)")
-
+STATUS_WORDS = ("upcoming", "open", "closed", "close", "listed", "allotment", "allotted")
 
 _BOARD = re.compile(r"\b(mainboard|main board|sme)\b", re.I)
 _CODE = re.compile(r"\(([A-Z])\)")
 
 
+def _board_of(text: str) -> str | None:
+    m = _BOARD.findall(text or "")
+    if not m:
+        return None
+    return "sme" if m[-1].lower() == "sme" else "mainboard"
+
+
+def _live_tables(soup):
+    """Every live GMP table, found by its header, with the board it belongs to.
+
+    Layouts seen on IPO Watch:
+    - until Oct 2026: 'IPO Name | IPO GMP | ... | Status', mainboard table
+      first, SME second
+    - Oct 2026 (briefly): one combined table, the Company cell reading
+      'Name (O) Mainboard'
+    - since mid-Oct 2026: 'Company | GMP* | Trend | Price Band | Est. Gain |
+      Date' under the headings 'Current Mainboard IPO' / 'Current SME IPO';
+      the Company cell is '<a>Name</a><br><span>Open</span>'
+    The board comes from a label in the row if there is one, else from the
+    heading above the table, else the first table is taken as mainboard."""
+    found = []
+    for table in soup.find_all("table"):
+        first = table.find("tr")
+        head = [_text(c).lower() for c in first.find_all(["th", "td"])] if first else []
+        if head and head[0] in ("ipo name", "company", "ipo", "ipo company") and any("gmp" in h for h in head):
+            h = table.find_previous(["h1", "h2", "h3", "h4", "h5"])
+            found.append((table, head, _board_of(_text(h)) if h else None))
+    if not found:
+        raise ParseError("live GMP table not found (header 'IPO Name'/'Company' + GMP)")
+    if not any(b for _, _, b in found):
+        found[0] = (found[0][0], found[0][1], "mainboard")
+    return found
+
+
+def _status(td, cell_text: str, a) -> str:
+    code = _CODE.search(cell_text)
+    if code:
+        return STATUS_CODES.get(code.group(1), code.group(1))
+    for el in td.find_all(["span", "small", "em", "i", "b"]):
+        if a is not None and el in a.parents:
+            continue
+        t = _text(el)
+        if t.lower() in STATUS_WORDS:
+            return t
+    return ""
+
+
 def parse_live(html: str, today: date) -> list[dict[str, Any]]:
     """Live MAINBOARD rows: name, current GMP, upper price, window, status, links."""
     soup = BeautifulSoup(html, "lxml")
-    table, head = _live_table(soup)
-    idx = {h: i for i, h in enumerate(head)}
-    combined = "status" not in idx  # new layout: board + status live in the name cell
+    out, total = [], 0
+    for table, head, table_board in _live_tables(soup):
+        idx = {h: i for i, h in enumerate(head)}
 
-    def col(cells, *names):
-        for n in names:
-            for h, i in idx.items():
-                if h.startswith(n) and i < len(cells):
-                    return cells[i]
-        return None
+        def col(cells, *names):
+            for n in names:
+                for h, i in idx.items():
+                    if h.startswith(n) and i < len(cells):
+                        return cells[i]
+            return None
 
-    out = []
-    for tr in table.find_all("tr")[1:]:
-        tds = tr.find_all("td")
-        cells = [_text(c) for c in tds]
-        a = tr.find("a", href=True)
-        if len(cells) < 4 or not a:
-            continue
-        name, status = cells[0], (col(cells, "status") or "").strip()
-        if combined:
-            boards = _BOARD.findall(cells[0])
-            if not boards or boards[-1].lower() == "sme":
-                continue  # SME rows (or unlabelled) - this table feeds mainboard only
-            code = _CODE.search(cells[0])
-            status = STATUS_CODES.get(code.group(1), code.group(1)) if code else ""
+        for tr in table.find_all("tr")[1:]:
+            tds = tr.find_all("td")
+            cells = [_text(c) for c in tds]
+            a = tr.find("a", href=True)
+            if len(cells) < 4 or not a:
+                continue
+            total += 1
+            board = _board_of(cells[0]) or table_board
+            if board != "mainboard":
+                continue
+            status = (col(cells, "status") or "").strip() or _status(tds[0], cells[0], a)
             name = _text(a) or _CODE.split(cells[0])[0]
             name = _BOARD.sub("", _CODE.sub("", name)).strip(" -|")
-        href = a["href"].replace("ipowatch.in//", "ipowatch.in/")
-        if href.startswith("/"):
-            href = HOST + href
-        open_d, close_d = _window(col(cells, "date") or "", today)
-        out.append({
-            "name": name,
-            "gmp_amount": money(col(cells, "ipo gmp", "gmp")),
-            "price_band_high": money(col(cells, "price band", "price", "ipo price")),
-            "open_date": open_d,
-            "close_date": close_d,
-            "status": status,
-            "overview_url": href,
-            "gmp_url": gmp_url_from_overview(href),
-            "raw": " | ".join(cells),
-        })
-    if combined and not out and len(table.find_all("tr")) > 3:
-        raise ParseError("live GMP table has rows but none labelled Mainboard - layout changed again?")
+            href = a["href"].replace("ipowatch.in//", "ipowatch.in/")
+            if href.startswith("/"):
+                href = HOST + href
+            gmp_url = href if "gmp" in urlparse(href).path else gmp_url_from_overview(href)
+            open_d, close_d = _window(col(cells, "date") or "", today)
+            out.append({
+                "name": name,
+                "gmp_amount": money(col(cells, "ipo gmp", "gmp")),
+                "price_band_high": money(col(cells, "price band", "price", "ipo price")),
+                "open_date": open_d,
+                "close_date": close_d,
+                "status": status,
+                "overview_url": href,
+                "gmp_url": gmp_url,
+                "raw": " | ".join(cells),
+            })
+    if not out and total:
+        raise ParseError(f"{total} live GMP rows but none identified as mainboard - layout changed again?")
     return out

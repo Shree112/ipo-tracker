@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import AdminTabs from "@/components/AdminTabs";
 import DayBars from "@/components/DayBars";
 import { dashboardData } from "@/lib/dashboard";
-import { getViewer, requireAdmin } from "@/lib/viewer";
+import { getViewer, maxUsers, requireAdmin } from "@/lib/viewer";
 import { telegramStatus, setTelegramWebhook } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
@@ -97,13 +97,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
       <h2 className="dash-h">Growth</h2>
       <div className="metrics">
-        <Tile label="Members" value={approved} sub={`of ${Number(process.env.MAX_USERS) || 100} places`} />
-        <Tile label="Waiting" value={count("pending")} sub={`${count("rejected")} declined or removed`} />
-        <Tile
-          label="Time to approve"
-          value={d.approveHours === null ? "–" : d.approveHours < 24 ? `${d.approveHours.toFixed(1)}h` : `${(d.approveHours / 24).toFixed(1)}d`}
-          sub="median"
-        />
+        <Tile label="Members" value={approved} sub={`of ${maxUsers()} places`} />
+        <Tile label="Places left" value={Math.max(0, maxUsers() - approved)} sub="sign-ups are automatic until 0" />
+        <Tile label="Waitlist" value={count("pending")} sub={`${count("rejected")} removed`} />
         <Tile
           label="Sign-ups, last 4 weeks"
           value={d.weekly.slice(-4).reduce((a, w) => a + w.n, 0)}
