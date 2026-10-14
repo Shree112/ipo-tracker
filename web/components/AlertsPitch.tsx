@@ -66,7 +66,7 @@ export default function AlertsPitch({
           <Link href={href} className="btn primary big">
             Set up my alerts
           </Link>
-          <span className="xs muted">Sign in with Google · accounts approved by hand</span>
+          <span className="xs muted">Sign in with Google</span>
         </div>
       </div>
       {example ? (

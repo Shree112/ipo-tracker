@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { askProspectus, type AskResult } from "@/app/(site)/issue/[slug]/actions";
 
 const SUGGESTED = [
@@ -16,6 +16,43 @@ type QA = { q: string; r: AskResult };
 
 // Ask questions of this IPO's prospectus. Answers come only from the passages
 // found, with page numbers so they can be checked in the PDF.
+// The model answers in light markdown: "- " bullets, **bold**, the odd
+// "### heading". Render just that much, never raw HTML.
+function inline(s: string) {
+  return s
+    .split(/(\*\*[^*\n]+\*\*)/g)
+    .map((part, i) => (part.length > 4 && part.startsWith("**") && part.endsWith("**") ? <b key={i}>{part.slice(2, -2)}</b> : part));
+}
+
+function RichAnswer({ text }: { text: string }) {
+  const blocks: ReactNode[] = [];
+  let items: string[] = [];
+  const flush = () => {
+    if (!items.length) return;
+    blocks.push(
+      <ul key={blocks.length}>
+        {items.map((t, i) => (
+          <li key={i}>{inline(t)}</li>
+        ))}
+      </ul>,
+    );
+    items = [];
+  };
+  for (const raw of text.split("\n")) {
+    const bullet = raw.match(/^\s*(?:[-*•–]|\d+[.)])\s+(.*)$/);
+    if (bullet) {
+      items.push(bullet[1]);
+      continue;
+    }
+    flush();
+    const line = raw.replace(/^\s*#{1,6}\s+/, "").trim();
+    if (!line) continue;
+    blocks.push(<p key={blocks.length}>{/^#{1,6}\s/.test(raw.trim()) ? <b>{inline(line)}</b> : inline(line)}</p>);
+  }
+  flush();
+  return <div className="ask-a">{blocks}</div>;
+}
+
 export default function AskProspectus({
   slug,
   rhpUrl,
@@ -77,7 +114,7 @@ export default function AskProspectus({
           <div className="ask-q">{x.q}</div>
           {x.r.ok ? (
             <>
-              <div className="ask-a">{x.r.answer}</div>
+              <RichAnswer text={x.r.answer} />
               <div className="xs muted ask-src">
                 {x.r.pages.length ? (
                   <span>

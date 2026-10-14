@@ -24,7 +24,7 @@ export default function Terms() {
       </p>
       <h2>Accounts</h2>
       <p>
-        Accounts are approved by hand and places are limited. Access can be withdrawn at any time. Please don&apos;t share
+        Places are limited, and new sign-ups join a waitlist once they are taken. Access can be withdrawn at any time. Please don&apos;t share
         your account or try to copy the data in bulk.
       </p>
       <h2>Privacy</h2>
