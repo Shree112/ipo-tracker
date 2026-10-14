@@ -865,3 +865,18 @@ p.preset-stats { display: block; }
 .subnav a.subnav-ai:hover { color: var(--ai-ink); background: color-mix(in srgb, var(--ai-1) 16%, transparent); }
 @media (max-width: 480px) { .ai-inner { padding: 16px 16px 18px; } }
 @media (max-width: 480px) { .ai-card .chips .chip-btn:nth-child(n+5) { display: none; } }
+
+/* feedback */
+.feedback-form { display: grid; gap: 10px; }
+.feedback-form .seg { justify-self: start; }
+.feedback-label { font-size: 14px; font-weight: 550; margin-top: 4px; }
+.feedback-text { height: auto; padding: 10px 12px; line-height: 1.5; resize: vertical; min-height: 130px; }
+.hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+.fb-row { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.fb-row:first-child { padding-top: 0; }
+.fb-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.fb-meta { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.fb-msg { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
+.site-footer { border-top: 1px solid var(--border); margin-top: 48px; padding: 18px 0 28px; }
+.site-footer .wrap { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; justify-content: space-between; }
+.site-footer nav { display: flex; gap: 16px; }

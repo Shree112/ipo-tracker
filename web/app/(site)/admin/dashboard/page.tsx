@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import AdminTabs from "@/components/AdminTabs";
 import DayBars from "@/components/DayBars";
 import { dashboardData } from "@/lib/dashboard";
+import { db, within } from "@/lib/db";
 import { getViewer, maxUsers, requireAdmin } from "@/lib/viewer";
 import { telegramStatus, setTelegramWebhook } from "@/lib/telegram";
 
@@ -49,9 +50,22 @@ function Tile({ label, value, sub }: { label: string; value: string | number; su
   );
 }
 
+const FEEDBACK_KIND: Record<string, string> = { idea: "Idea", bug: "Bug", data: "Wrong data", other: "Other" };
+
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ tg?: string }> }) {
   const { tg: tgResult } = await searchParams;
-  const [viewer, d, tg] = await Promise.all([requireAdmin(), dashboardData(), telegramStatus()]);
+  const [viewer, d, tg, feedback] = await Promise.all([
+    requireAdmin(),
+    dashboardData(),
+    telegramStatus(),
+    // newest feedback; an empty list until the feedback table exists
+    within(
+      db()<{ id: string; created_at: Date; kind: string; message: string; email: string | null; page: string | null }[]>`
+        SELECT id::text AS id, created_at, kind, message, email, page FROM feedback ORDER BY created_at DESC LIMIT 20`,
+      6000,
+      "feedback",
+    ).catch(() => []),
+  ]);
   const count = (s: string) => d.members.find((m) => m.status === s)?.n ?? 0;
   const approved = count("approved");
   const sent = d.digests.reduce((a, x) => a + x.n, 0);
@@ -152,6 +166,35 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           sub={`avg listing gain when allotted ${signed(d.allot.gain)}`}
         />
       </div>
+
+      <h2 className="dash-h">Feedback</h2>
+      <section className="card section">
+        {feedback.length ? (
+          feedback.map((f) => (
+            <div key={f.id} className="fb-row">
+              <div className="fb-meta xs muted">
+                <span className="badge">{FEEDBACK_KIND[f.kind] ?? f.kind}</span> {ago(f.created_at)}
+                {f.email ? (
+                  <>
+                    {" · "}
+                    <a className="link" href={`mailto:${f.email}`}>
+                      {f.email}
+                    </a>
+                  </>
+                ) : (
+                  " · anonymous"
+                )}
+                {f.page ? ` · from ${f.page}` : null}
+              </div>
+              <div className="fb-msg">{f.message}</div>
+            </div>
+          ))
+        ) : (
+          <p className="small muted">
+            No feedback yet. People send it from the Feedback link at the bottom of every page (/feedback).
+          </p>
+        )}
+      </section>
 
       <h2 className="dash-h">System health</h2>
       <section className="card">

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import TopBar from "@/components/TopBar";
 import { getViewer } from "@/lib/viewer";
 
@@ -15,6 +16,22 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
     <>
       <TopBar viewer={viewer} />
       {children}
+      <footer className="site-footer">
+        <div className="wrap">
+          <span className="xs muted">GMP is an unofficial grey-market quote. Nothing here is investment advice.</span>
+          <nav className="small">
+            <Link className="link" href="/feedback">
+              Feedback
+            </Link>
+            <Link className="link" href="/privacy">
+              Privacy
+            </Link>
+            <Link className="link" href="/terms">
+              Terms
+            </Link>
+          </nav>
+        </div>
+      </footer>
     </>
   );
 }

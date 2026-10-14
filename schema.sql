@@ -612,6 +612,20 @@ CREATE TABLE IF NOT EXISTS rhp_doc (
   fetched_at  timestamptz NOT NULL DEFAULT now()
 );
 
+-- Feedback from the /feedback page. Anyone can send it, signed in or not.
+CREATE TABLE IF NOT EXISTS feedback (
+  id           bigserial PRIMARY KEY,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  user_id      uuid REFERENCES app_users(user_id) ON DELETE SET NULL,
+  email        text,
+  kind         text NOT NULL DEFAULT 'other' CHECK (kind IN ('idea','bug','data','other')),
+  message      text NOT NULL,
+  page         text,
+  sender_key   text,          -- hashed IP, only for the per-hour limit
+  notified_at  timestamptz    -- when the admin was emailed about it
+);
+CREATE INDEX IF NOT EXISTS feedback_created_idx ON feedback (created_at DESC);
+
 -- Which version of this file was last applied (scripts/apply_schema.py skips
 -- the run when nothing changed, so scheduled jobs don't take table locks).
 CREATE TABLE IF NOT EXISTS schema_meta (

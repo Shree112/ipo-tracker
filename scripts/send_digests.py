@@ -143,6 +143,15 @@ def account_emails(conn, dry_run: bool) -> None:
         waiting = cur.fetchall()
         cur.execute("SELECT email FROM app_users WHERE is_admin AND status = 'approved'")
         admins = [r["email"] for r in cur.fetchall()]
+        try:
+            cur.execute("SAVEPOINT fb")
+            cur.execute("""SELECT id, kind, message, email, page FROM feedback
+                           WHERE notified_at IS NULL ORDER BY created_at LIMIT 50""")
+            feedback = cur.fetchall()
+            cur.execute("RELEASE SAVEPOINT fb")
+        except Exception:  # feedback table not created yet
+            cur.execute("ROLLBACK TO SAVEPOINT fb")
+            feedback = []
 
     for u in welcome:
         first = (u["name"] or "").split(" ")[0] or "there"
@@ -162,6 +171,27 @@ def account_emails(conn, dry_run: bool) -> None:
             cur.execute("UPDATE app_users SET welcome_sent_at = now() WHERE user_id = %s::uuid", (u["user_id"],))
         conn.commit()
         print(f"  welcome sent to {u['to_addr']}")
+
+    if feedback and admins:
+        kinds = {"idea": "Idea", "bug": "Bug", "data": "Wrong data", "other": "Other"}
+        items = "".join(
+            f'<li style="margin-bottom:10px;"><b>{kinds.get(f["kind"], f["kind"])}</b> &middot; '
+            f'{html.escape(f["email"] or "anonymous")}<br>{html.escape(f["message"][:1500])}</li>'
+            for f in feedback)
+        n = len(feedback)
+        body = f'<ul style="padding-left:18px;margin:0 0 6px;">{items}</ul>'
+        text = "\n\n".join(f"[{kinds.get(f['kind'], f['kind'])}] {f['email'] or 'anonymous'}\n{f['message']}"
+                           for f in feedback) + f"\n\nAll feedback: {site}/admin/dashboard\n"
+        if dry_run:
+            print(f"  would tell {admins} about {n} feedback message(s)")
+        else:
+            for a in admins:
+                send_email(a, f"{n} new feedback message{'s' if n != 1 else ''}: IPO Copilot",
+                           _note_html(f"{n} new feedback", body, "Open the dashboard",
+                                      f"{site}/admin/dashboard" if site else ""), text)
+            with conn.cursor() as cur:
+                cur.execute("UPDATE feedback SET notified_at = now() WHERE id = ANY(%s)", ([f["id"] for f in feedback],))
+            conn.commit()
 
     if waiting and admins:
         names = "".join(f"<li>{html.escape(w['name'] or w['email'])} &middot; {html.escape(w['email'])}</li>"

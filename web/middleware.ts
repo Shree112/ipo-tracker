@@ -26,9 +26,10 @@ function devViewer(): { id: string; email: string; name: string } | null {
 export async function middleware(req: NextRequest) {
   const path = req.nextUrl.pathname;
   const onSignin = path === "/signin";
-  // readable without an account: the live list and the issue pages (with the
-  // research sections locked). Everything else needs a signed-in user.
-  const isPublic = path === "/" || path.startsWith("/issue/") || path === "/track-record";
+  // readable without an account: the live list, the issue pages (with the
+  // research sections locked) and the feedback form. Everything else needs a
+  // signed-in user.
+  const isPublic = path === "/" || path.startsWith("/issue/") || path === "/track-record" || path === "/feedback";
 
   const setCookies: { name: string; value: string; options: object }[] = [];
   const setHeaders: Record<string, string> = {};

@@ -44,6 +44,7 @@ export default function TopBar({ viewer }: { viewer?: Viewer | null }) {
               {approved ? <Link href="/settings">Alert settings</Link> : null}
               {approved ? <Link href="/my-ipos">My IPOs</Link> : null}
               {viewer.isAdmin ? <Link href="/admin/dashboard">Admin</Link> : null}
+              <Link href="/feedback">Send feedback</Link>
               <form action="/auth/signout" method="post">
                 <button type="submit">Sign out</button>
               </form>
