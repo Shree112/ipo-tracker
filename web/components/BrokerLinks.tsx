@@ -9,17 +9,18 @@ import { useEffect, useState } from "react";
 //   which of its web addresses the app handles ("universal links"). Groww does
 //   for groww.in/ipo; Zerodha does for kite.zerodha.com/mobile/*. Upstox and
 //   Angel One publish none, so on iPhone those open the App Store page.
-// - Android: an intent:// link names the broker's app package. If the app is
-//   installed and handles that address it opens straight away (Groww, Zerodha
-//   and Angel One publish Android app links); otherwise Chrome falls back to the
-//   app's Play Store page, where "Open" (or "Install") is one tap.
+// - Android: a market://launch link. The Play Store opens the broker's app
+//   when it is installed and shows its store page (with "Install") when it
+//   isn't. The earlier intent://<broker web address> links fell through to the
+//   Play Store even with the app installed, because the apps don't claim those
+//   exact web addresses. /admin/brokers lists other link styles to try on a phone.
 // - Desktop: the broker's web IPO page.
 //
 // Nobody publishes per-issue links, so the app opens on its IPO section (or
 // home screen); the member picks the issue there.
-type Platform = "ios" | "android" | "desktop";
+export type Platform = "ios" | "android" | "desktop";
 
-type Broker = {
+export type Broker = {
   name: string;
   web: string;
   ios: string; // universal link, or the App Store page when there is none
@@ -27,7 +28,7 @@ type Broker = {
   androidUrl: string; // the https address handed to the app on Android
 };
 
-const BROKERS: Broker[] = [
+export const BROKERS: Broker[] = [
   {
     name: "Zerodha",
     web: "https://kite.zerodha.com/bids/ipo",
@@ -58,7 +59,7 @@ const BROKERS: Broker[] = [
   },
 ];
 
-function detect(): Platform {
+export function detect(): Platform {
   if (typeof navigator === "undefined") return "desktop";
   const ua = navigator.userAgent;
   if (/android/i.test(ua)) return "android";
@@ -69,13 +70,7 @@ function detect(): Platform {
 
 function href(b: Broker, p: Platform): string {
   if (p === "ios") return b.ios;
-  if (p === "android") {
-    const u = new URL(b.androidUrl);
-    return (
-      `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=https;package=${b.androidPackage};` +
-      `S.browser_fallback_url=${encodeURIComponent(`https://play.google.com/store/apps/details?id=${b.androidPackage}`)};end`
-    );
-  }
+  if (p === "android") return `market://launch?id=${b.androidPackage}`;
   return b.web;
 }
 

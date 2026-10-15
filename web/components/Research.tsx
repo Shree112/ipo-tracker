@@ -1,6 +1,7 @@
 import type { AnchorInvestor, IssueDetail } from "@/lib/queries";
 import { crore, fmtDate } from "@/lib/format";
 import { Fold } from "./Fold";
+import FinChart, { type FinSeries } from "./FinChart";
 
 // Anchor categories use categorical slots 1-4 of the validated palette, in
 // palette order (so every adjacent pair in the stacked bar is a validated
@@ -150,6 +151,66 @@ const FIN_LABEL: Record<string, string> = {
   "Total Borrowing": "Total borrowing",
 };
 
+// Year-on-year bar charts, one small chart per line item.
+// Flow items (income, profit) are only comparable across full years, so a
+// part-year stub period (e.g. "30 Jun 2026" next to March year-ends) is left
+// out of those; balance-sheet items are point-in-time and keep every period.
+const FLOW = new Set(["Total Income", "Revenue", "Profit After Tax", "EBITDA"]);
+const CHARTED = ["Total Income", "Profit After Tax", "EBITDA", "NET Worth", "Assets", "Total Borrowing"];
+// short titles so they fit a phone-width chart next to the change figure
+const CHART_TITLE: Record<string, string> = {
+  "Total Income": "Income",
+  "Profit After Tax": "Profit (PAT)",
+  "NET Worth": "Net worth",
+  "Total Borrowing": "Borrowing",
+};
+const MON = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+function parsePeriod(p: string): { month: number; year: number } | null {
+  const m = p.toLowerCase().match(/([a-z]{3})[a-z]*\.?\s*'?(\d{2,4})/);
+  if (!m) return null;
+  const month = MON.indexOf(m[1]);
+  if (month < 0) return null;
+  const year = m[2].length === 2 ? 2000 + Number(m[2]) : Number(m[2]);
+  return { month, year };
+}
+
+function periodLabel(p: string): string {
+  const d = parsePeriod(p);
+  if (!d) return p;
+  const yy = String(d.year).slice(2);
+  return d.month === 2 ? `FY${yy}` : `${MON[d.month][0].toUpperCase()}${MON[d.month].slice(1)} ’${yy}`;
+}
+
+function finSeries(periods: string[], rows: { metric: string; values: (number | null)[] }[]) {
+  const parsed = periods.map(parsePeriod);
+  // the year-end month most periods share; anything else is a part-year
+  const counts = new Map<number, number>();
+  parsed.forEach((d) => d && counts.set(d.month, (counts.get(d.month) ?? 0) + 1));
+  const yearEnd = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const partial = parsed.map((d) => periods.length > 2 && !!d && yearEnd !== undefined && d.month !== yearEnd);
+  const stub = periods.find((_, i) => partial[i]) ?? null;
+
+  const series: FinSeries[] = CHARTED.map((metric) => rows.find((r) => r.metric === metric))
+    .filter((r): r is NonNullable<typeof r> => !!r)
+    .map((r) => ({
+      metric: r.metric,
+      title: CHART_TITLE[r.metric] ?? FIN_LABEL[r.metric] ?? r.metric,
+      pts: periods
+        .map((p, i) => ({ label: periodLabel(p), full: p, v: r.values[i] ?? null, part: partial[i] }))
+        .filter((x): x is typeof x & { v: number } => x.v !== null && !(FLOW.has(r.metric) && x.part))
+        .reverse(), // oldest on the left
+    }))
+    .filter((c) => c.pts.length >= 2);
+  const note = stub ? `Income and profit compare full years only; the part-year to ${stub} is in the table.` : null;
+  return { series, note };
+}
+
+function FinChartBlock({ periods, rows }: { periods: string[]; rows: { metric: string; values: (number | null)[] }[] }) {
+  const { series, note } = finSeries(periods, rows);
+  return series.length ? <FinChart series={series} note={note} /> : null;
+}
+
 export function Financials({ detail }: { detail: IssueDetail | null }) {
   const f = detail?.financials;
   const k = detail?.kpis ?? {};
@@ -202,9 +263,10 @@ export function Financials({ detail }: { detail: IssueDetail | null }) {
   return (
     <Fold id="financials" title="Financials & valuation" summary={summary}>
       <p className="xs muted" style={{ marginBottom: 8 }}>Restated, ₹ crore</p>
+      {f ? <FinChartBlock periods={f.periods} rows={f.rows} /> : null}
       {f ? (
         <div className="table-wrap">
-          <table>
+          <table className="fin-table">
             <thead>
               <tr>
                 <th>Period</th>
